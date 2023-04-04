@@ -1,2 +1,2 @@
 # ECoMiD household MST markers
- Analysis of MST markers detected in samples collected from Ecuadorian households
+Microbial source tracking markers in Ecuadorian households
