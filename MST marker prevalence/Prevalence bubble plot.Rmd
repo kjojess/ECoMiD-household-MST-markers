@@ -2,7 +2,7 @@
 title: "MST marker bubble plots"
 author: "Kelsey Jesser"
 date: "9/22/2022"
-output: html_document
+output: pdf_document
 ---
 **Prevalence of MST markers in Ecuadorian household samples**
 
@@ -112,10 +112,9 @@ prev_sampletype<-data.frame(Sample_Type=counts$Sample_Type,
 prev_sampletype_balloon<-prev_sampletype %>%
   subset(Assay != "Human_positive" & Assay != "Any_positive" & Assay != "Any_animal_pos" & Assay != "Any_source_spec_pos")
 
-
-kbl(prev_sampletype_balloon)%>%
-  kable_styling(latex_options="scale_down", font_size=10)%>%
-  kable_minimal()
+#kbl(prev_sampletype_balloon)%>%
+  #kable_styling(latex_options="scale_down", font_size=10)%>%
+  #kable_minimal()
 
 #plot
 prev_sampletype_balloon$Assay <- factor(prev_sampletype_balloon$Assay, levels = c("Rum2Bac", "Pig2Bac", "GFD", "DG37", "HF183", "GenBac"))
@@ -148,7 +147,6 @@ b<-ggballoonplot(prev_sampletype_balloon,
   b
 ```
 
-
 Overall prevalence by assay
 ```{r message=FALSE, warning=FALSE}
 perc_all<-data.frame(GenBac=(sum(prev$GenBac))/586*100, 
@@ -159,12 +157,12 @@ perc_all<-data.frame(GenBac=(sum(prev$GenBac))/586*100,
                      Rum2Bac=(sum(prev$Rum2Bac))/586*100)
 
 kbl(perc_all)%>%
-  kable_styling(latex_options="scale_down", font_size=10)%>%
+  kable_styling(latex_options="scale_down", font_size=12)%>%
   kable_minimal()
 
 ```
 
-Number of detections by sample type
+Number of detections by sample type and marker
 ```{r message=FALSE, warning=FALSE}
 prev_melt<-prev %>%
   melt(id.vars=c("Sample_Code", "Sample_Type", "Site", "Household"), variable.name=("measurement"), value.name="value")
@@ -182,7 +180,7 @@ detections_host<-prev%>%
   summarize(count=sum(value, na.rm=TRUE))
 
 kbl(detections_host)%>%
-  kable_styling(latex_options="scale_down", font_size=10)%>%
+  kable_styling(latex_options="scale_down")%>%
   kable_minimal()
 
 ```
