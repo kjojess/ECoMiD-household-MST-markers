@@ -1,9 +1,10 @@
 ---
-title: "AnEx Phase II bubble plots"
+title: "MST marker bubble plots"
 author: "Kelsey Jesser"
 date: "9/22/2022"
 output: html_document
 ---
+**Prevalence of MST markers in Ecuadorian household samples**
 
 Load libraries
 ```{r message=FALSE, warning=FALSE}

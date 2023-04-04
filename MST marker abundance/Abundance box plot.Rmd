@@ -2,10 +2,13 @@
 title: "Abundance box plots"
 author: "Kelsey Jesser"
 date: "10/5/2022"
-output: html_document
+output: pdf_document
 ---
+**MST marker abundance in Ecuadorian household samples**
+
+
 Load libraries
-```{r}
+```{r message=FALSE, warning=FALSE}
 library(ggplot2)
 library(magrittr)
 library(reshape2)
@@ -18,17 +21,17 @@ library(ggthemes)
 ```
 
 Clear environment
-```{r}
+```{r message=FALSE, warning=FALSE}
 #rm(list = ls())
 ```
 
 Import data
-```{r}
+```{r message=FALSE, warning=FALSE}
 data<-read.csv("Phase II 09022022.csv")
 ```
 
 Concentration box plots
-```{r}
+```{r message=FALSE, warning=FALSE}
 data_melt<-data %>% 
   subset(select=-c(GenBac, HF183, Rum2Bac, Pig2Bac, DG37, GFD)) %>%
   melt(id.vars=c("Sample_Code", "Sample_Type", "Site", "Household"), variable.name=("measurement"), value.name="value")
@@ -79,7 +82,7 @@ f+ggtitle("Log concentration by site")
 
 ```
 Nicely formatted multiplot
-```{r}
+```{r message=FALSE, warning=FALSE}
 data_melt$measurement <- factor(data_melt$measurement, levels = c("Log10_GenBac", "Log10_HF183", "Log10_DG37", "Log10_GFD", "Log10_Pig2Bac", "Log10_Rum2Bac"))
 
 labels<-c("GenBac (general)", "HF183 (human)", "DG37 (dog)", "GFD (poultry)", "Pig2Bac (pig)", "Rum2Bac (ruminant)")
@@ -115,7 +118,7 @@ abundance_boxplot+ggtitle("Marker abundance by sample type")
 ```
 
 Nicely formatted multiplot that includes only sample types with 3 or more host-associated detections
-```{r}
+```{r message=FALSE, warning=FALSE}
 data_melt_sub<-data_melt%>% 
   subset(Sample_Type=="Adult hands (n=59)" | Sample_Type=="Child hands (n=31)" | Sample_Type=="Doorknob (n=59)" | Sample_Type=="Floor (n=59)" | Sample_Type== "Food-prep surface (n=58)")
 
@@ -145,13 +148,5 @@ abundance_boxplot_sub<-ggplot(data=data_melt_sub,
         panel.spacing.y=unit(0, "line"), 
         panel.border=element_rect(color="black", fill=NA))
 abundance_boxplot_sub+ggtitle("Marker abundance by sample type")
-```
-Mean abundances
-```{r}
-data<-read.csv("Phase II prelim data from Aldo_Updated_09022022.csv", na.strings=c("BDL", "DNQ"))
-
-data_means <- data_melt%>%
-  group_by(measurement)%>%
-  summarize(mean=mean(value, na.rm=TRUE), sd=sd(value, na.rm=TRUE))
 ```
 
