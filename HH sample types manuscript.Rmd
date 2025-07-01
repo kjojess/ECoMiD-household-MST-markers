@@ -1,0 +1,1529 @@
+---
+title: "HH sample types no models"
+author: "Kelsey Jesser"
+date: "6/16/2023"
+output: html_document
+---
+#Clear environment
+```{r}
+rm(list = ls())
+```
+
+#Load libraries   
+```{r}
+library(ggplot2)
+library(dplyr)
+library(kableExtra)
+library(stringr)
+library(tibble)
+library(reshape2)
+library(ggpubr)
+library(rstatix)
+library(RVAideMemoire)
+library(tidyr)
+library(purrr)
+library(sandwich)
+library(lmtest)
+library(tidyr)
+library(gt)
+library(gtsummary)
+library(forcats)
+library(purrr)
+library(flextable)
+library(geepack)
+```
+
+#Import and reformat data
+```{r}
+#metadata
+HH<-read.csv("AnExII_ODKdata_qPCRMST_KJ.csv")%>%
+  select(c(9, 82, 85, 105:106, 126, 128, 180, 184, 186, 207, 209:210, 212, 232, 234, 238, 255:260, 293:295, 297, 315:318))%>%
+  mutate(Household=factor(Household))
+
+#abundance data
+data<-read.csv("Updated_AnExII.csv")%>%
+  dplyr::mutate_at(vars(6:11), as.numeric)%>%
+  dplyr::mutate(GenBac_log=log10(GenBac))%>%
+  dplyr::mutate(GenBac_log=str_replace(GenBac_log, "BDL", "1250"))%>%
+  dplyr::mutate(GenBac_log=str_replace(GenBac_log, "DNQ", "2500"))%>%
+  dplyr::mutate(across(starts_with("GenBac"), as.numeric))%>%
+  dplyr::mutate(Household=factor(Household))%>%
+  dplyr::mutate(Site=factor(Site))%>%
+  dplyr::mutate(Sample_Type=factor(Sample_Type))%>%
+  dplyr::mutate(Sample_Type = if_else(Sample_Type == "Mom's hands", "Adult hands", Sample_Type))%>%
+  dplyr::mutate(Sample_Type = if_else(Sample_Type == "Child's hands", "Child hands", Sample_Type))%>%
+  left_join(HH, by = "Household")
+
+#marker presence absence
+prev<-read.csv("Updated_AnExII GenBac raw.csv")%>%
+  dplyr::mutate(across(6:11, ~str_replace(., "BDL", "0")))%>%
+  dplyr::mutate(across(6:11, ~str_replace(., "DNQ", "1")))%>%
+  mutate_at(vars(6:11), as.numeric)%>%
+  mutate(Site=as.factor(Site))%>%
+  mutate(Sample_Type=as.factor(Sample_Type))%>%
+  mutate(Household=as.factor(Household))%>%
+  rowwise()%>%
+  dplyr::mutate(Any_animal_marker=sum(dplyr::c_across(8:11)))%>%
+  dplyr::mutate(Any_host_marker=sum(dplyr::c_across(7:11)))%>%
+  dplyr::mutate(Any_marker=sum(dplyr::c_across(6:11)))%>%
+  dplyr::mutate(across(6:14, ~if_else(. >0, 1, .)))%>%
+  mutate(Sample_Type = if_else(Sample_Type == "Mom's hands", "Adult hands", Sample_Type))%>%
+  mutate(Sample_Type = if_else(Sample_Type == "Child's hands", "Child hands", Sample_Type))%>%
+  left_join(HH, by = "Household")
+
+samples<-table(data$Sample_Type)%>%
+  as.data.frame()%>%
+  dplyr::rename(Sample_Type=Var1)
+```
+
+#MST marker prevalence in any sample
+```{r message=FALSE, warning=FALSE}
+prev <- prev %>%
+  mutate(any_host = as.integer(HF183 == 1 | Rum2Bac == 1 | Pig2Bac == 1 | DG37 == 1 | GFD == 1),
+         any_animal = as.integer(Rum2Bac == 1 | Pig2Bac == 1 | DG37 == 1 | GFD == 1))
+
+perc_all <- data.frame(
+  GenBac = sum(prev$GenBac) / 586 * 100,
+  HF183 = sum(prev$HF183) / 586 * 100,
+  DG37 = sum(prev$DG37) / 586 * 100,
+  GFD = sum(prev$GFD) / 586 * 100,
+  Pig2Bac = sum(prev$Pig2Bac) / 586 * 100,
+  Rum2Bac = sum(prev$Rum2Bac) / 586 * 100,
+  Any_Host = sum(prev$any_host) / 586 * 100,
+  Any_Animal = sum(prev$any_animal) / 586 * 100
+) %>%
+  mutate(across(where(is.numeric), round, 2))
+
+kbl(perc_all) %>%
+  kable_styling(latex_options = "scale_down", font_size = 14) %>%
+  kable_styling(bootstrap_options = "hover", full_width = FALSE) %>%
+  add_header_above(c("MST marker % prevalence in any sample" = 8))
+
+total_pos <- data.frame(
+  GenBac = sum(prev$GenBac),
+  HF183 = sum(prev$HF183),
+  DG37 = sum(prev$DG37),
+  GFD = sum(prev$GFD),
+  Pig2Bac = sum(prev$Pig2Bac),
+  Rum2Bac = sum(prev$Rum2Bac),
+  Any_Host = sum(prev$any_host),
+  Any_Animal = sum(prev$any_animal)
+)
+
+kbl(total_pos) %>%
+  kable_styling(latex_options = "scale_down", font_size = 14) %>%
+  kable_styling(bootstrap_options = "hover", full_width = FALSE) %>%
+  add_header_above(c("MST marker detections in any sample" = 8))
+
+```
+
+#MST marker prevalence by sample type
+```{r message=FALSE, warning=FALSE}
+prev_melt<-prev %>%
+  melt(id.vars=c("Code", "Sample_Type", "Site", "Household"), variable.name=("measurement"), value.name="value")
+  
+detections<-prev%>%
+  select(c(3, 6:14))%>%
+  melt(id.vars=c("Sample_Type"), variable.name=("MST marker"), value.name="value")%>%
+  group_by(Sample_Type, `MST marker`)%>%
+  dplyr::summarize(`Positive sample n`=sum(value), `Total sample n`=n(), Percent= (sum(value)/n()*100))%>%
+  mutate(across(where(is.numeric), ~ round(., 2)))
+
+kbl(detections)%>%
+  kable_styling(latex_options="scale_down", font_size=14)%>%
+  kable_styling(bootstrap_options="hover", full_width=F)%>%
+  add_header_above(c("MST marker prevalence by sample type"=5))
+```
+
+#Prevalence plot
+```{r}
+#format data
+counts<-prev %>%
+  select(-matches("Number"))%>%
+  select(c(3, 6:11))%>% #can update this line to include additional data (ex: any host, any animal marker)
+  melt(id.vars= c("Sample_Type"))%>%
+  group_by(Sample_Type, variable)%>%
+  dplyr::summarize(cnt=n())
+
+sums<- prev %>%
+  select(-matches("Number"))%>%
+  select(c(3, 6:11))%>% #can update this line to include additional data (ex: any host, any animal marker)
+  melt(id.vars= c("Sample_Type"))%>%
+  group_by(Sample_Type, variable)%>%
+  dplyr::summarise(across(value, sum))
+
+prev_sampletype<-data.frame(Sample_Type=counts$Sample_Type, 
+                            Assay=counts$variable, 
+                            Total_Samples=counts$cnt, 
+                            Total_Pos=sums$value, 
+                            Percent_Pos=sums$value/counts$cnt*100)
+
+prev_sampletype_balloon<-prev_sampletype %>%
+  subset(Assay != "Human_positive" & Assay != "Any_positive" & Assay != "Any_animal_pos" & Assay != "Any_source_spec_pos")
+
+#plot
+prev_sampletype_balloon$Assay <- factor(prev_sampletype_balloon$Assay, levels = c("Rum2Bac", "Pig2Bac", "GFD", "DG37", "HF183", "GenBac"))
+
+labels<-c("Rum2Bac (ruminant)", "Pig2Bac (pig)", "GFD (poultry)", "DG37 (dog)", "HF183 (human)", "GenBac3 (general)")
+
+
+cols <- c("GenBac"="#FF9DA7", "HF183"="#59A14F", "DG37"="#76B7B4", "GFD"="#E15759", "Pig2Bac"="#F28E2B", "Rum2Bac"="#4E79A7")
+
+prevalence_plot<-ggballoonplot(prev_sampletype_balloon, 
+             x="Sample_Type",
+             y="Assay",
+             fill="Assay", 
+             size="Percent_Pos",
+             ggtheme=theme_minimal())+
+  scale_fill_manual(values=cols, labels=scales::percent)+
+  scale_y_discrete(labels=labels)+
+  #scale_x_discrete(labels=labels2)+
+  ggtitle("Prevalence of MST markers")+
+  guides(fill = "none",
+         size=guide_legend(title="Positive\nsamples (%)"))+
+  theme(axis.text.y=element_text(size=14),
+        axis.text.x=element_text(size=14), 
+        legend.background=element_rect(color=NA),
+        legend.text=element_text(size=12),
+        legend.title=element_text(size=13),
+        panel.border=element_rect(color="black", fill=NA))
+  
+prevalence_plot
+```
+
+#Sample type and MST marker detection
+```{r}
+markers<-c("GenBac", "HF183", "DG37", "Pig2Bac", "Pig2Bac", "Rum2Bac")
+
+#GenBac
+GenBac_counts<-prev%>%
+  group_by(Sample_Type)%>%
+  dplyr::summarize(detected=sum(GenBac))%>%
+  left_join(samples, by= "Sample_Type")%>%
+  mutate(not_detected=Freq-detected)%>%
+  select(-c(Freq))
+
+GenBac_mosaic<-GenBac_counts%>%
+  column_to_rownames("Sample_Type")%>%
+  as.matrix()
+mosaicplot(GenBac_mosaic, color=TRUE, las=3)
+
+fisher_GenBac<-GenBac_counts%>%
+  column_to_rownames("Sample_Type")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_GenBac #p<0.0001, run pairwise posthoc tests
+
+fisher_GenBac_multi_corrected<-GenBac_counts%>%
+  column_to_rownames("Sample_Type")%>%
+  as.matrix()%>%
+  fisher.multcomp(p.method = "BH")
+fisher_GenBac_multi_corrected$p.value%>%
+  as.data.frame()%>%
+  mutate(across(where(is.numeric), ~ round(., 3)))%>%
+  kbl()%>%
+  kable_styling(bootstrap_options="hover", full_width=F)%>%
+  add_header_above(c("GenBac pairwise Fisher's test adj p-values"=14))
+#write.csv(fisher_GenBac_multi_corrected$p.value, file="GenBac_fisher_pvalues.csv")
+
+fisher_GenBac3_posthoc <- fisher_GenBac_multi_corrected$p.value %>%
+  as.data.frame() %>%
+  mutate(across(where(is.numeric), ~ case_when(
+    is.na(.)    ~ "",
+    . < 0.001   ~ "<0.001",
+    TRUE        ~ formatC(., format = "f", digits = 3)
+  )))
+#write.csv(fisher_GenBac3_posthoc, file = "fisher_GenBac3_posthoc.csv")
+
+#HF183
+HF183_counts<-prev%>%
+  dplyr::group_by(Sample_Type)%>%
+  dplyr::summarize(detected=sum(HF183))%>%
+  dplyr::left_join(samples, by= "Sample_Type")%>%
+  mutate(not_detected=Freq-detected)%>%
+  select(-c(Freq))
+
+HF183_mosaic<-HF183_counts%>%
+  column_to_rownames("Sample_Type")%>%
+  as.matrix()
+mosaicplot(HF183_mosaic, color=TRUE, las=3)
+
+fisher_HF183<-HF183_counts%>%
+  column_to_rownames("Sample_Type")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_HF183 #p<0.0001, run pairwise posthoc tests
+
+fisher_HF183_multi_corrected<-HF183_counts%>%
+  column_to_rownames("Sample_Type")%>%
+  as.matrix()%>%
+  fisher.multcomp(p.method = "BH")
+fisher_HF183_multi_corrected$p.value%>%
+  as.data.frame()%>%
+  mutate(across(where(is.numeric), ~ round(., 3)))%>%
+  kbl()%>%
+  kable_styling(bootstrap_options="hover", full_width=F)%>%
+  add_header_above(c("HF183 pairwise Fisher's test adj p-values"=14))
+#write.csv(fisher_HF183_multi_corrected$p.value, file="HF183_fisher_pvalues.csv")
+
+fisher_HF183_posthoc <- fisher_HF183_multi_corrected$p.value %>%
+  as.data.frame() %>%
+  mutate(across(where(is.numeric), ~ case_when(
+    is.na(.)    ~ "",
+    . < 0.001   ~ "<0.001",
+    TRUE        ~ formatC(., format = "f", digits = 3)
+  )))
+write.csv(fisher_HF183_posthoc, file = "fisher_HF183_posthoc.csv")
+
+#DG37
+DG37_counts<-prev%>%
+  dplyr::group_by(Sample_Type)%>%
+  dplyr::summarize(detected=sum(DG37))%>%
+  dplyr::left_join(samples, by= "Sample_Type")%>%
+  mutate(not_detected=Freq-detected)%>%
+  select(-c(Freq))
+
+DG37_mosaic<-DG37_counts%>%
+  column_to_rownames("Sample_Type")%>%
+  as.matrix()
+mosaicplot(DG37_mosaic, color=TRUE, las=3)
+
+fisher_DG37<-DG37_counts%>%
+  column_to_rownames("Sample_Type")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_DG37 #p<0.0001, run pairwise posthoc tests
+
+fisher_DG37_multi_corrected<-DG37_counts%>%
+  column_to_rownames("Sample_Type")%>%
+  as.matrix()%>%
+  fisher.multcomp(p.method = "BH")
+fisher_DG37_multi_corrected$p.value%>%
+  as.data.frame()%>%
+  mutate(across(where(is.numeric), ~ round(., 3)))%>%
+  kbl()%>%
+  kable_styling(bootstrap_options="hover", full_width=F)%>%
+  add_header_above(c("DG37 pairwise Fisher's test adj p-values"=14))
+#write.csv(fisher_HF183_multi_corrected$p.value, file="DG37_fisher_pvalues.csv")
+
+fisher_DG37_posthoc <- fisher_DG37_multi_corrected$p.value %>%
+  as.data.frame() %>%
+  mutate(across(where(is.numeric), ~ case_when(
+    is.na(.)    ~ "",
+    . < 0.001   ~ "<0.001",
+    TRUE        ~ formatC(., format = "f", digits = 3)
+  )))
+#write.csv(fisher_DG37_posthoc, file = "fisher_DG367_posthoc.csv")
+
+#GFD
+GFD_counts<-prev%>%
+  dplyr::group_by(Sample_Type)%>%
+  dplyr::summarize(detected=sum(GFD))%>%
+  dplyr::left_join(samples, by= "Sample_Type")%>%
+  mutate(not_detected=Freq-detected)%>%
+  select(-c(Freq))
+
+GFD_mosaic<-GFD_counts%>%
+  column_to_rownames("Sample_Type")%>%
+  as.matrix()
+mosaicplot(GFD_mosaic, color=TRUE, las=3)
+
+fisher_GFD<-GFD_counts%>%
+  column_to_rownames("Sample_Type")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_GFD #p<0.0001, run pairwise posthoc tests
+
+fisher_GFD_multi_corrected<-GFD_counts%>%
+  column_to_rownames("Sample_Type")%>%
+  as.matrix()%>%
+  fisher.multcomp(p.method = "BH")
+fisher_GFD_multi_corrected$p.value%>%
+  as.data.frame()%>%
+  mutate(across(where(is.numeric), ~ round(., 3)))%>%
+  kbl()%>%
+  kable_styling(bootstrap_options="hover", full_width=F)%>%
+  add_header_above(c("GFD pairwise Fisher's test adj p-values"=14))
+#write.csv(fisher_HF183_multi_corrected$p.value, file="GFD_fisher_pvalues.csv")
+
+fisher_GFD_posthoc <- fisher_GFD_multi_corrected$p.value %>%
+  as.data.frame() %>%
+  mutate(across(where(is.numeric), ~ case_when(
+    is.na(.)    ~ "",
+    . < 0.001   ~ "<0.001",
+    TRUE        ~ formatC(., format = "f", digits = 3)
+  )))
+write.csv(fisher_GFD_posthoc, file = "fisher_GFD_posthoc.csv")
+
+
+#Rum2Bac
+Rum2Bac_counts<-prev%>%
+  dplyr::group_by(Sample_Type)%>%
+  dplyr::summarize(detected=sum(Rum2Bac))%>%
+  dplyr::left_join(samples, by= "Sample_Type")%>%
+  mutate(not_detected=Freq-detected)%>%
+  select(-c(Freq))
+
+Rum2Bac_mosaic<-Rum2Bac_counts%>%
+  column_to_rownames("Sample_Type")%>%
+  as.matrix()
+mosaicplot(Rum2Bac_mosaic, color=TRUE, las=3)
+
+fisher_Rum2Bac<-Rum2Bac_counts%>%
+  column_to_rownames("Sample_Type")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_Rum2Bac #ns; p>0.05
+
+#Pig2Bac
+Pig2Bac_counts<-prev%>%
+  dplyr::group_by(Sample_Type)%>%
+  dplyr::summarize(detected=sum(Pig2Bac))%>%
+  dplyr::left_join(samples, by= "Sample_Type")%>%
+  mutate(not_detected=Freq-detected)%>%
+  select(-c(Freq))
+
+Pig2Bac_mosaic<-Pig2Bac_counts%>%
+  column_to_rownames("Sample_Type")%>%
+  as.matrix()
+mosaicplot(Pig2Bac_mosaic, color=TRUE, las=3)
+
+fisher_Pig2Bac<-Pig2Bac_counts%>%
+  column_to_rownames("Sample_Type")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4) #ns; p>0.05
+
+#summarize p-values
+prev_fisher<-list(GenBac=fisher_GenBac, HF183=fisher_HF183, DG37=fisher_DG37, GFD=fisher_GFD, Rum2Bac=fisher_Rum2Bac, Pig2Bac=fisher_Pig2Bac)
+combined_prev_fisher<-map_df(prev_fisher, bind_rows, .id="source")
+combined_prev_fisher
+
+```
+
+#Abundance plot
+```{r}
+data_melt<-read.csv("Updated_AnExII GenBac raw.csv")%>%
+  mutate_at(vars(6:11), as.numeric)%>%
+  mutate(GenBac_log=log10(GenBac))%>%
+  mutate(HF183_log=log10(HF183))%>%
+  mutate(DG37_log=log10(DG37))%>%
+  mutate(GFD_log=log10(GFD))%>%
+  mutate(Rum2Bac_log=log10(Rum2Bac))%>%
+  mutate(Pig2Bac_log=log10(Pig2Bac))%>%
+  mutate(Sample_Type = if_else(Sample_Type == "Mom's hands", "Adult hands", Sample_Type))%>%
+  mutate(Sample_Type = if_else(Sample_Type == "Child's hands", "Child hands", Sample_Type))%>%
+  select(c(Sample_Type, Code, Site, Household, GenBac_log, HF183_log, DG37_log, GFD_log, Rum2Bac_log, Pig2Bac_log))%>%
+  melt(id.vars=c("Code", "Sample_Type", "Site", "Household"), variable.name=("measurement"), value.name="value")
+data_melt$value<-as.numeric(data_melt$value)
+
+data_melt$measurement <- factor(data_melt$measurement, levels = c("GenBac_log", "HF183_log", "DG37_log", "GFD_log", "Pig2Bac_log", "Rum2Bac_log"))
+
+labels<-c("GenBac3 (general)", "HF183 (human)", "DG37 (dog)", "GFD (poultry)", "Pig2Bac (pig)", "Rum2Bac (ruminant)")
+
+cols <- c("GenBac_log"="#FF9DA7", "HF183_log"="#59A14F", "DG37_log"="#76B7B4", "GFD_log"="#E15759", "Pig2Bac_log"="#F28E2B", "Rum2Bac_log"="#4E79A7")
+
+abundance_boxplot <- ggplot(data = data_melt, 
+                            aes(x = measurement, y = value, fill = measurement)) +
+  geom_boxplot(outlier.shape = NA) +
+  theme_minimal() +
+  scale_fill_manual(values = cols, labels = labels) +
+  scale_x_discrete(labels = labels) +
+  guides(fill = guide_legend(title = "Marker")) +
+  facet_wrap(~Sample_Type, nrow = 3) +
+  labs(y = "Log gene copies per sample") +
+  theme(
+    axis.line = element_line(),
+    axis.text.y = element_text(size = 10),
+    axis.title.y = element_text(size = 14),
+    legend.background = element_rect(color = NA),
+    legend.text = element_text(size = 11),
+    legend.title = element_text(size = 13),
+    axis.text.x = element_blank(),
+    axis.ticks.x = element_blank(),
+    axis.title.x = element_blank(),
+    strip.text.x = element_text(size = 13), 
+    panel.spacing.x = unit(0, "line"),
+    panel.spacing.y = unit(0, "line"), 
+    panel.border = element_rect(color = "black", fill = NA)
+  )
+
+abundance_boxplot
+```
+
+#GenBac concentration testing
+```{r}
+#Plot abundances
+GenBac_plot<-data%>%
+  subset(!(Sample_Type %in% c("Food", "Soil"))) %>%
+  ggplot(aes(x=reorder(Sample_Type, GenBac_log, na.rm=TRUE), GenBac_log, fill="#FF9DA7"))+
+  geom_boxplot()+
+  theme_minimal()+
+  labs(y="Log gene copies per sample", x="Sample type")+
+  ggtitle("GenBac3 abundance by sample type")+
+  theme(axis.line=element_line(),
+        axis.text.y=element_text(size=10),
+        axis.title.y=element_text(size=12),
+        legend.position="none",
+        axis.ticks.x=element_blank(),
+        axis.title.x=element_blank(),
+        strip.text.x=element_text(size=13), 
+        panel.spacing.x=unit(0, "line"),
+        panel.spacing.y=unit(0, "line"), 
+        panel.border=element_rect(color="black", fill=NA), 
+        axis.text.x = element_text(angle = 45, hjust=1, size=12))
+
+
+GenBac_plot
+
+#normality
+shapiro.test(data$GenBac_log) #data is non-normal
+
+#Kruskal Wallis testing by sample type
+kruskal.test(data$GenBac_log ~ data$Sample_Type) #p<2.2e-16; run pairwise posthoc Dunn's tests
+
+dunn_GenBac<-dunn_test(data=data, GenBac_log ~ Sample_Type, p.adjust.method="BH")
+dunn_GenBac%>%
+  select(-c(".y."))%>%
+  mutate(across(where(is.numeric), ~ round(., 3)))%>%
+  kbl()
+write.csv(dunn_GenBac, file="Dunn_posthoc_GenBac.csv")
+```
+
+#Floor sample metadata
+```{r}
+prev_floor<-prev%>%
+   subset(Sample_Type=="Floor")
+
+Floor_types<-prev_floor %>%
+  dplyr::group_by(Floor.type)%>%
+  dplyr::rename(Floor=Floor.type)%>%
+  dplyr::summarize(Count=n())
+
+Floors_cleaned<-prev_floor %>%
+  dplyr::group_by(floor.floor_cleaning)%>%
+  dplyr::rename(Floor = floor.floor_cleaning)%>%
+  dplyr::summarize(Count=n())
+
+Floors<-Floor_types%>%
+  rbind(Floors_cleaned)%>%
+  kbl(col.names=NULL)%>%
+  kable_styling(bootstrap_options="hover", full_width=F)%>%
+  pack_rows("Floor Type", 1, 6)%>%
+  pack_rows("Floors cleaned in past 24h", 7,8)%>%
+  add_header_above(c("Floor sample metadata(n=59)"=2))
+Floors
+```
+
+#Floor type and MST marker detection in floor samples
+```{r}
+#GenBac
+Floor_type_GenBac_counts<-prev%>%
+  dplyr::rename("Floor"="Floor.type")%>%
+  subset(Sample_Type=="Floor")%>%
+  dplyr::group_by(Floor)%>%
+  dplyr::summarize(detected=sum(GenBac))%>%
+  dplyr::left_join(Floor_types, by= "Floor")%>%
+  dplyr::mutate(not_detected=Count-detected)%>%
+  select(-c(Count))
+
+Floor_type_GenBac_mosaic<-Floor_type_GenBac_counts%>%
+  column_to_rownames("Floor")%>%
+  as.matrix()
+mosaicplot(Floor_type_GenBac_mosaic, color=TRUE, las=3)
+
+fisher_floor_type_GenBac<-Floor_type_GenBac_counts%>%
+  column_to_rownames("Floor")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_floor_type_GenBac #ns; p>0.05
+
+#HF183
+Floor_type_HF183_counts<-prev%>%
+  dplyr::rename("Floor"="Floor.type")%>%
+  subset(Sample_Type=="Floor")%>%
+  dplyr::group_by(Floor)%>%
+  dplyr::summarize(detected=sum(HF183))%>%
+  left_join(Floor_types, by= "Floor")%>%
+  mutate(not_detected=Count-detected)%>%
+  select(-c(Count))
+
+Floor_type_HF183_mosaic<-Floor_type_HF183_counts%>%
+  column_to_rownames("Floor")%>%
+  as.matrix()
+mosaicplot(Floor_type_HF183_mosaic, color=TRUE, las=3)
+
+fisher_floor_type_HF183<-Floor_type_HF183_counts%>%
+  column_to_rownames("Floor")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_floor_type_HF183 #ns; p>0.05
+
+#DG37
+Floor_type_DG37_counts<-prev%>%
+  dplyr::rename("Floor"="Floor.type")%>%
+  subset(Sample_Type=="Floor")%>%
+  dplyr::group_by(Floor)%>%
+  dplyr::summarize(detected=sum(DG37))%>%
+  left_join(Floor_types, by= "Floor")%>%
+  mutate(not_detected=Count-detected)%>%
+  select(-c(Count))
+
+Floor_type_DG37_mosaic<-Floor_type_DG37_counts%>%
+  column_to_rownames("Floor")%>%
+  as.matrix()
+mosaicplot(Floor_type_DG37_mosaic, color=TRUE, las=3)
+
+fisher_floor_type_DG37<-Floor_type_DG37_counts%>%
+  column_to_rownames("Floor")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_floor_type_DG37 #ns; p>0.05
+
+#GFD
+Floor_type_GFD_counts<-prev%>%
+  dplyr::rename("Floor"="Floor.type")%>%
+  subset(Sample_Type=="Floor")%>%
+  dplyr::group_by(Floor)%>%
+  dplyr::summarize(detected=sum(GFD))%>%
+  left_join(Floor_types, by= "Floor")%>%
+  mutate(not_detected=Count-detected)%>%
+  select(-c(Count))
+
+Floor_type_GFD_mosaic<-Floor_type_GFD_counts%>%
+  column_to_rownames("Floor")%>%
+  as.matrix()
+mosaicplot(Floor_type_GFD_mosaic, color=TRUE, las=3)
+
+fisher_floor_type_GFD<-Floor_type_GFD_counts%>%
+  column_to_rownames("Floor")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_floor_type_GFD #ns; p>0.0
+
+#Rum2Bac
+Floor_type_Rum2Bac_counts<-prev%>%
+  dplyr::rename("Floor"="Floor.type")%>%
+  subset(Sample_Type=="Floor")%>%
+  dplyr::group_by(Floor)%>%
+  dplyr::summarize(detected=sum(Rum2Bac))%>%
+  left_join(Floor_types, by= "Floor")%>%
+  mutate(not_detected=Count-detected)%>%
+  select(-c(Count))
+
+Floor_type_Rum2Bac_mosaic<-Floor_type_Rum2Bac_counts%>%
+  column_to_rownames("Floor")%>%
+  as.matrix()
+mosaicplot(Floor_type_Rum2Bac_mosaic, color=TRUE, las=3)
+
+fisher_floor_type_Rum2Bac<-Floor_type_Rum2Bac_counts%>%
+  column_to_rownames("Floor")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_floor_type_Rum2Bac #ns; p>0.0
+
+#Pig2Bac
+Floor_type_Pig2Bac_counts<-prev%>%
+  dplyr::rename("Floor"="Floor.type")%>%
+  subset(Sample_Type=="Floor")%>%
+  group_by(Floor)%>%
+  dplyr::summarize(detected=sum(Pig2Bac))%>%
+  left_join(Floor_types, by= "Floor")%>%
+  mutate(not_detected=Count-detected)%>%
+  select(-c(Count))
+
+Floor_type_Pig2Bac_mosaic<-Floor_type_Pig2Bac_counts%>%
+  column_to_rownames("Floor")%>%
+  as.matrix()
+mosaicplot(Floor_type_Pig2Bac_mosaic, color=TRUE, las=3)
+
+fisher_floor_type_Pig2Bac<-Floor_type_Pig2Bac_counts%>%
+  column_to_rownames("Floor")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_floor_type_Pig2Bac%>%
+  kbl()%>%
+  kable_styling(bootstrap_options="hover", full_width=F)%>%
+  add_header_above(c("Pig2Bac floor type pairwise Fisher's test p-value"=3)) #ns; p>0.0
+```
+
+#Floor cleaning and MST marker detection in floor samples
+```{r}
+#GenBac
+Floor_clean_GenBac_counts<-prev%>%
+  dplyr::rename("Floor"="floor.floor_cleaning")%>%
+  subset(Sample_Type=="Floor")%>%
+  group_by(Floor)%>%
+  dplyr::summarize(detected=sum(GenBac))%>%
+  left_join(Floors_cleaned, by= "Floor")%>%
+  mutate(not_detected=Count-detected)%>%
+  select(-c(Count))
+
+Floor_clean_GenBac_mosaic<-Floor_clean_GenBac_counts%>%
+  column_to_rownames("Floor")%>%
+  as.matrix()
+mosaicplot(Floor_clean_GenBac_mosaic, color=TRUE, las=3)
+
+fisher_floor_clean_GenBac<-Floor_clean_GenBac_counts%>%
+  column_to_rownames("Floor")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_floor_clean_GenBac #ns; p>0.05
+
+#HF183
+Floor_clean_HF183_counts<-prev%>%
+  dplyr::rename("Floor"="floor.floor_cleaning")%>%
+  subset(Sample_Type=="Floor")%>%
+  group_by(Floor)%>%
+  dplyr::summarize(detected=sum(HF183))%>%
+  left_join(Floors_cleaned, by= "Floor")%>%
+  mutate(not_detected=Count-detected)%>%
+  select(-c(Count))
+
+Floor_clean_HF183_mosaic<-Floor_clean_HF183_counts%>%
+  column_to_rownames("Floor")%>%
+  as.matrix()
+mosaicplot(Floor_clean_HF183_mosaic, color=TRUE, las=3)
+
+fisher_floor_clean_HF183<-Floor_clean_HF183_counts%>%
+  column_to_rownames("Floor")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_floor_clean_HF183 #ns; p<0.05
+
+#DG37
+Floor_clean_DG37_counts<-prev%>%
+  dplyr::rename("Floor"="floor.floor_cleaning")%>%
+  subset(Sample_Type=="Floor")%>%
+  group_by(Floor)%>%
+  dplyr::summarize(detected=sum(DG37))%>%
+  left_join(Floors_cleaned, by= "Floor")%>%
+  mutate(not_detected=Count-detected)%>%
+  select(-c(Count))
+
+Floor_clean_DG37_mosaic<-Floor_clean_DG37_counts%>%
+  column_to_rownames("Floor")%>%
+  as.matrix()
+mosaicplot(Floor_clean_DG37_mosaic, color=TRUE, las=3)
+
+fisher_floor_clean_DG37<-Floor_clean_DG37_counts%>%
+  column_to_rownames("Floor")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_floor_clean_DG37#ns; p>0.05
+
+#GFD
+Floor_clean_GFD_counts<-prev%>%
+  dplyr::rename("Floor"="floor.floor_cleaning")%>%
+  subset(Sample_Type=="Floor")%>%
+  group_by(Floor)%>%
+  dplyr::summarize(detected=sum(GFD))%>%
+  left_join(Floors_cleaned, by= "Floor")%>%
+  mutate(not_detected=Count-detected)%>%
+  select(-c(Count))
+
+Floor_clean_GFD_mosaic<-Floor_clean_GFD_counts%>%
+  column_to_rownames("Floor")%>%
+  as.matrix()
+mosaicplot(Floor_clean_GFD_mosaic, color=TRUE, las=3)
+
+fisher_floor_clean_GFD<-Floor_clean_GFD_counts%>%
+  column_to_rownames("Floor")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_floor_clean_GFD #ns; p>0.05
+
+#Rum2Bac
+Floor_clean_Rum2Bac_counts<-prev%>%
+  dplyr::rename("Floor"="floor.floor_cleaning")%>%
+  subset(Sample_Type=="Floor")%>%
+  group_by(Floor)%>%
+  dplyr::summarize(detected=sum(Rum2Bac))%>%
+  left_join(Floors_cleaned, by= "Floor")%>%
+  mutate(not_detected=Count-detected)%>%
+  select(-c(Count))
+
+Floor_clean_Rum2Bac_mosaic<-Floor_clean_Rum2Bac_counts%>%
+  column_to_rownames("Floor")%>%
+  as.matrix()
+mosaicplot(Floor_clean_Rum2Bac_mosaic, color=TRUE, las=3)
+
+fisher_floor_clean_Rum2Bac<-Floor_clean_Rum2Bac_counts%>%
+  column_to_rownames("Floor")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_floor_clean_Rum2Bac #ns; p>0.05
+
+#Pig2Bac
+Floor_clean_Pig2Bac_counts<-prev%>%
+  dplyr::rename("Floor"="floor.floor_cleaning")%>%
+  subset(Sample_Type=="Floor")%>%
+  group_by(Floor)%>%
+  dplyr::summarize(detected=sum(Pig2Bac))%>%
+  left_join(Floors_cleaned, by= "Floor")%>%
+  mutate(not_detected=Count-detected)%>%
+  select(-c(Count))
+
+Floor_clean_Pig2Bac_mosaic<-Floor_clean_Pig2Bac_counts%>%
+  column_to_rownames("Floor")%>%
+  as.matrix()
+mosaicplot(Floor_clean_Pig2Bac_mosaic, color=TRUE, las=3)
+
+fisher_floor_clean_Pig2Bac<-Floor_clean_Pig2Bac_counts%>%
+  column_to_rownames("Floor")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_floor_clean_Pig2Bac #ns; p>0.05
+```
+
+#Hand rinse metadata
+```{r}
+prev_adult_hands<-prev %>%
+  subset(Sample_Type=="Adult hands")
+
+prev_child_hands<-prev %>%
+  subset(Sample_Type=="Child hands")
+
+Adult_hands_nails<-prev_adult_hands%>%
+  mutate(handrinse.nails_madre=str_replace(handrinse.nails_madre, "yes", "Dirty nails"))%>%
+  mutate(handrinse.nails_madre=str_replace(handrinse.nails_madre, "no", "Clean nails"))%>%
+  group_by(handrinse.nails_madre)%>%
+  dplyr::summarize(Count=n())%>%
+  dplyr::rename("Clean_dirty"=handrinse.nails_madre)
+
+Adult_hands_dirt<-prev_adult_hands%>%
+  mutate(handrinse.dirt_madre=str_replace(handrinse.dirt_madre, "yes", "Dirty hands"))%>%
+  mutate(handrinse.dirt_madre=str_replace(handrinse.dirt_madre, "no", "Clean hands"))%>%
+  group_by(handrinse.dirt_madre)%>%
+  dplyr::summarize(Count=n())%>%
+  dplyr::rename("Clean_dirty"=handrinse.dirt_madre)
+
+Adult_hands_washed<-prev_adult_hands%>%
+  group_by(handrinse.mother_handwash)%>%
+  dplyr::summarize(Count=n())%>%
+  dplyr::rename("Clean_dirty"=handrinse.mother_handwash)
+
+Adult_hands_nails<-prev_adult_hands%>%
+  mutate(handrinse.nails_madre=str_replace(handrinse.nails_madre, "yes", "Dirty nails"))%>%
+  mutate(handrinse.nails_madre=str_replace(handrinse.nails_madre, "no", "Clean nails"))%>%
+  group_by(handrinse.nails_madre)%>%
+  dplyr::summarize(Count=n())%>%
+  dplyr::rename("Clean_dirty"=handrinse.nails_madre)
+
+Adult_hands <-Adult_hands_dirt%>%
+  rbind(Adult_hands_nails)%>%
+  rbind(Adult_hands_washed)%>%
+  group_by(Clean_dirty)%>%
+  dplyr::rename(" "=Clean_dirty)%>%
+  kbl(col.names=NULL)%>%
+  kable_styling(bootstrap_options="hover", full_width=F)%>%
+  pack_rows("Adult hands", 1, 2) %>%
+  pack_rows("Adult nails", 3, 4) %>%
+  pack_rows("Adult last washed", 5, 8)%>%
+  add_header_above(c("Adult handwash metadata (n=59)"=2))
+Adult_hands
+
+Child_hands_nails<-prev_child_hands%>%
+  mutate(handrinse.nails_bebe=str_replace(handrinse.nails_bebe, "yes", "Dirty nails"))%>%
+  mutate(handrinse.nails_bebe=str_replace(handrinse.nails_bebe, "no", "Clean nails"))%>%
+  group_by(handrinse.nails_bebe)%>%
+  dplyr::summarize(Count=n())%>%
+  dplyr::rename("Clean_dirty"=handrinse.nails_bebe)
+
+Child_hands_dirt<-prev_child_hands%>%
+  mutate(handrinse.dirt_bebe=str_replace(handrinse.dirt_bebe, "yes", "Dirty hands"))%>%
+  mutate(handrinse.dirt_bebe=str_replace(handrinse.dirt_bebe, "no", "Clean hands"))%>%
+  group_by(handrinse.dirt_bebe)%>%
+  dplyr::summarize(Count=n())%>%
+  dplyr::rename("Clean_dirty"=handrinse.dirt_bebe)
+
+Child_hands_washed<-prev_child_hands%>%
+  group_by(handrinse.child_handwash)%>%
+  dplyr::summarize(Count=n())%>%
+  dplyr::rename("Clean_dirty"=handrinse.child_handwash)
+
+Child_hands <-Child_hands_dirt%>%
+  rbind(Child_hands_nails)%>%
+  rbind(Child_hands_washed)%>%
+  group_by(Clean_dirty)%>%
+  dplyr::rename(" "=Clean_dirty)%>%
+  kbl(col.names=NULL)%>%
+  kable_styling(bootstrap_options="hover", full_width=F)%>%
+  pack_rows("Child hands", 1, 2) %>%
+  pack_rows("Child nails", 3, 4) %>%
+  pack_rows("Child last washed", 5, 8)%>%
+  add_header_above(c("Child hand wash metadata(n=31)"=2))
+Child_hands
+```
+
+#Adult hand cleanliness and MST marker detection in adult hand washes
+```{r}
+#No test for GenBac; GenBac marker present in all adult hand washes
+
+#HF183
+AdultHands_dirt_HF183_counts<-prev%>%
+  subset(Sample_Type=="Adult hands")%>%
+  dplyr::rename("AdultHands_dirty"="handrinse.dirt_madre")%>%
+  group_by(AdultHands_dirty)%>%
+  dplyr::summarize(detected=sum(HF183), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+AdultHands_dirt_HF183_mosaic<-AdultHands_dirt_HF183_counts%>%
+  column_to_rownames("AdultHands_dirty")%>%
+  as.matrix()
+mosaicplot(AdultHands_dirt_HF183_mosaic, color=TRUE, las=3)
+
+fisher_AdultHands_dirty_HF183<-AdultHands_dirt_HF183_counts%>%
+  column_to_rownames("AdultHands_dirty")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_AdultHands_dirty_HF183 #ns; p>0.05
+
+#DG37
+AdultHands_dirt_DG37_counts<-prev%>%
+  subset(Sample_Type=="Adult hands")%>%
+  dplyr::rename("AdultHands_dirty"="handrinse.dirt_madre")%>%
+  group_by(AdultHands_dirty)%>%
+  dplyr::summarize(detected=sum(DG37), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+AdultHands_dirt_DG37_mosaic<-AdultHands_dirt_DG37_counts%>%
+  column_to_rownames("AdultHands_dirty")%>%
+  as.matrix()
+mosaicplot(AdultHands_dirt_DG37_mosaic, color=TRUE, las=3)
+
+fisher_AdultHands_dirty_DG37<-AdultHands_dirt_DG37_counts%>%
+  column_to_rownames("AdultHands_dirty")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_AdultHands_dirty_DG37 #ns; p>0.05
+
+#GFD
+AdultHands_dirt_GFD_counts<-prev%>%
+  subset(Sample_Type=="Adult hands")%>%
+  dplyr::rename("AdultHands_dirty"="handrinse.dirt_madre")%>%
+  group_by(AdultHands_dirty)%>%
+  dplyr::summarize(detected=sum(GFD), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+AdultHands_dirt_GFD_mosaic<-AdultHands_dirt_GFD_counts%>%
+  column_to_rownames("AdultHands_dirty")%>%
+  as.matrix()
+mosaicplot(AdultHands_dirt_GFD_mosaic, color=TRUE, las=3)
+
+fisher_AdultHands_dirty_GFD<-AdultHands_dirt_GFD_counts%>%
+  column_to_rownames("AdultHands_dirty")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_AdultHands_dirty_GFD #ns; p>0.05
+
+#Rum2Bac
+AdultHands_dirt_Rum2Bac_counts<-prev%>%
+  subset(Sample_Type=="Adult hands")%>%
+  dplyr::rename("AdultHands_dirty"="handrinse.dirt_madre")%>%
+  group_by(AdultHands_dirty)%>%
+  dplyr::summarize(detected=sum(Rum2Bac), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+AdultHands_dirt_Rum2Bac_mosaic<-AdultHands_dirt_Rum2Bac_counts%>%
+  column_to_rownames("AdultHands_dirty")%>%
+  as.matrix()
+mosaicplot(AdultHands_dirt_Rum2Bac_mosaic, color=TRUE, las=3)
+
+fisher_AdultHands_dirty_Rum2Bac<-AdultHands_dirt_Rum2Bac_counts%>%
+  column_to_rownames("AdultHands_dirty")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_AdultHands_dirty_Rum2Bac #ns; p>0.05
+
+#Pig2Bac
+AdultHands_dirt_Pig2Bac_counts<-prev%>%
+  subset(Sample_Type=="Adult hands")%>%
+  dplyr::rename("AdultHands_dirty"="handrinse.dirt_madre")%>%
+  group_by(AdultHands_dirty)%>%
+  dplyr::summarize(detected=sum(Pig2Bac), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count)) 
+
+AdultHands_dirt_Pig2Bac_mosaic<-AdultHands_dirt_Pig2Bac_counts%>%
+  column_to_rownames("AdultHands_dirty")%>%
+  as.matrix()
+mosaicplot(AdultHands_dirt_Pig2Bac_mosaic, color=TRUE, las=3)
+
+fisher_AdultHands_dirty_Pig2Bac<-AdultHands_dirt_Pig2Bac_counts%>%
+  column_to_rownames("AdultHands_dirty")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_AdultHands_dirty_Pig2Bac#ns; p>0.05
+```
+
+#Adult nail cleanliness and MST marker detection in adult hand washes
+```{r}
+#No test for GenBac; GenBac marker present in all adult hand washes
+
+#HF183
+AdultNails_dirt_HF183_counts<-prev%>%
+  subset(Sample_Type=="Adult hands")%>%
+  dplyr::rename("AdultNails_dirty"="handrinse.nails_madre")%>%
+  group_by(AdultNails_dirty)%>%
+  dplyr::summarize(detected=sum(HF183), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+AdultNails_dirt_HF183_mosaic<-AdultNails_dirt_HF183_counts%>%
+  column_to_rownames("AdultNails_dirty")%>%
+  as.matrix()
+mosaicplot(AdultNails_dirt_HF183_mosaic, color=TRUE, las=3)
+
+fisher_AdultNails_dirty_HF183<-AdultNails_dirt_HF183_counts%>%
+  column_to_rownames("AdultNails_dirty")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_AdultNails_dirty_HF183 #ns; p>0.05
+
+#DG37
+AdultNails_dirt_DG37_counts<-prev%>%
+  subset(Sample_Type=="Adult hands")%>%
+  dplyr::rename("AdultNails_dirty"="handrinse.nails_madre")%>%
+  group_by(AdultNails_dirty)%>%
+  dplyr::summarize(detected=sum(DG37), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+AdultNails_dirt_DG37_mosaic<-AdultNails_dirt_DG37_counts%>%
+  column_to_rownames("AdultNails_dirty")%>%
+  as.matrix()
+mosaicplot(AdultNails_dirt_DG37_mosaic, color=TRUE, las=3)
+
+fisher_AdultNails_dirty_DG37<-AdultNails_dirt_DG37_counts%>%
+  column_to_rownames("AdultNails_dirty")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_AdultNails_dirty_DG37 #ns; p>0.05
+
+#GFD
+AdultNails_dirt_GFD_counts<-prev%>%
+  subset(Sample_Type=="Adult hands")%>%
+  dplyr::rename("AdultNails_dirty"="handrinse.nails_madre")%>%
+  group_by(AdultNails_dirty)%>%
+  dplyr::summarize(detected=sum(GFD), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+AdultNails_dirt_GFD_mosaic<-AdultNails_dirt_GFD_counts%>%
+  column_to_rownames("AdultNails_dirty")%>%
+  as.matrix()
+mosaicplot(AdultNails_dirt_GFD_mosaic, color=TRUE, las=3)
+
+fisher_AdultNails_dirty_GFD<-AdultNails_dirt_GFD_counts%>%
+  column_to_rownames("AdultNails_dirty")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_AdultNails_dirty_GFD #ns; p>0.05
+
+#Rum2Bac
+AdultNails_dirt_Rum2Bac_counts<-prev%>%
+  subset(Sample_Type=="Adult hands")%>%
+  dplyr::rename("AdultNails_dirty"="handrinse.nails_madre")%>%
+  group_by(AdultNails_dirty)%>%
+  dplyr::summarize(detected=sum(Rum2Bac), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+AdultNails_dirt_Rum2Bac_mosaic<-AdultNails_dirt_Rum2Bac_counts%>%
+  column_to_rownames("AdultNails_dirty")%>%
+  as.matrix()
+mosaicplot(AdultNails_dirt_Rum2Bac_mosaic, color=TRUE, las=3)
+
+fisher_AdultNails_dirty_Rum2Bac<-AdultNails_dirt_Rum2Bac_counts%>%
+  column_to_rownames("AdultNails_dirty")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_AdultNails_dirty_Rum2Bac #ns; p>0.05
+
+#Pig2Bac
+AdultNails_dirt_Pig2Bac_counts<-prev%>%
+  subset(Sample_Type=="Adult hands")%>%
+  dplyr::rename("AdultNails_dirty"="handrinse.nails_madre")%>%
+  group_by(AdultNails_dirty)%>%
+  dplyr::summarize(detected=sum(Pig2Bac), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count)) 
+
+AdultNails_dirt_Pig2Bac_mosaic<-AdultNails_dirt_Pig2Bac_counts%>%
+  column_to_rownames("AdultNails_dirty")%>%
+  as.matrix()
+mosaicplot(AdultNails_dirt_Pig2Bac_mosaic, color=TRUE, las=3)
+
+fisher_AdultNails_dirty_Pig2Bac<-AdultNails_dirt_Pig2Bac_counts%>%
+  column_to_rownames("AdultNails_dirty")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_AdultNails_dirty_Pig2Bac #ns; p>0.05
+```
+
+#Adult last washed and MST marker detection in adult hand washes
+```{r}
+#No test for GenBac; GenBac marker present in all adult hand washes
+
+#HF183
+Adult_lastwashed_HF183_counts<-prev%>%
+  subset(Sample_Type=="Adult hands")%>%
+  dplyr::rename("Adult_lastwashed"="handrinse.mother_handwash")%>%
+  group_by(Adult_lastwashed)%>%
+  dplyr::summarize(detected=sum(HF183), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+Adult_lastwashed_HF183_mosaic<-Adult_lastwashed_HF183_counts%>%
+  column_to_rownames("Adult_lastwashed")%>%
+  as.matrix()
+mosaicplot(Adult_lastwashed_HF183_mosaic, color=TRUE, las=3)
+
+fisher_Adult_lastwashed_HF183<-Adult_lastwashed_HF183_counts%>%
+  column_to_rownames("Adult_lastwashed")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_Adult_lastwashed_HF183 #ns; p>0.05
+
+#DG37
+Adult_lastwashed_DG37_counts<-prev%>%
+  subset(Sample_Type=="Adult hands")%>%
+  dplyr::rename("Adult_lastwashed"="handrinse.mother_handwash")%>%
+  group_by(Adult_lastwashed)%>%
+  dplyr::summarize(detected=sum( DG37), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+Adult_lastwashed_DG37_mosaic<-Adult_lastwashed_DG37_counts%>%
+  column_to_rownames("Adult_lastwashed")%>%
+  as.matrix()
+mosaicplot(Adult_lastwashed_DG37_mosaic, color=TRUE, las=3)
+
+fisher_Adult_lastwashed_DG37<-Adult_lastwashed_DG37_counts%>%
+  column_to_rownames("Adult_lastwashed")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_Adult_lastwashed_DG37 #ns; p>0.05
+
+#GFD
+Adult_lastwashed_GFD_counts<-prev%>%
+  subset(Sample_Type=="Adult hands")%>%
+  dplyr::rename("Adult_lastwashed"="handrinse.mother_handwash")%>%
+  group_by(Adult_lastwashed)%>%
+  dplyr::summarize(detected=sum(GFD), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+Adult_lastwashed_GFD_mosaic<-Adult_lastwashed_GFD_counts%>%
+  column_to_rownames("Adult_lastwashed")%>%
+  as.matrix()
+mosaicplot(Adult_lastwashed_GFD_mosaic, color=TRUE, las=3)
+
+fisher_Adult_lastwashed_GFD<-Adult_lastwashed_GFD_counts%>%
+  column_to_rownames("Adult_lastwashed")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_Adult_lastwashed_GFD #ns; p>0.05
+
+#Rum2Bac
+Adult_lastwashed_Rum2Bac_counts<-prev%>%
+  subset(Sample_Type=="Adult hands")%>%
+  dplyr::rename("Adult_lastwashed"="handrinse.mother_handwash")%>%
+  group_by(Adult_lastwashed)%>%
+  dplyr::summarize(detected=sum(Rum2Bac), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+Adult_lastwashed_Rum2Bac_mosaic<-Adult_lastwashed_Rum2Bac_counts%>%
+  column_to_rownames("Adult_lastwashed")%>%
+  as.matrix()
+mosaicplot(Adult_lastwashed_Rum2Bac_mosaic, color=TRUE, las=3)
+
+fisher_Adult_lastwashed_Rum2Bac<-Adult_lastwashed_Rum2Bac_counts%>%
+  column_to_rownames("Adult_lastwashed")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_Adult_lastwashed_Rum2Bac #ns; p>0.05
+
+#Pig2Bac
+Adult_lastwashed_Pig2Bac_counts<-prev%>%
+  subset(Sample_Type=="Adult hands")%>%
+  dplyr::rename("Adult_lastwashed"="handrinse.mother_handwash")%>%
+  group_by(Adult_lastwashed)%>%
+  dplyr::summarize(detected=sum(Pig2Bac), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+Adult_lastwashed_Pig2Bac_mosaic<-Adult_lastwashed_Pig2Bac_counts%>%
+  column_to_rownames("Adult_lastwashed")%>%
+  as.matrix()
+mosaicplot(Adult_lastwashed_Pig2Bac_mosaic, color=TRUE, las=3)
+
+fisher_Adult_lastwashed_Pig2Bac<-Adult_lastwashed_Pig2Bac_counts%>%
+  column_to_rownames("Adult_lastwashed")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_Adult_lastwashed_Pig2Bac #ns; p>0.05
+```
+
+#Child hand cleanliness and MST marker detection in child hand washes
+```{r}
+#No test for GenBac; GenBac marker present in all child hand washes
+
+#HF183
+ChildHands_dirt_HF183_counts<-prev%>%
+  subset(Sample_Type=="Child hands")%>%
+  dplyr::rename("ChildHands_dirty"="handrinse.dirt_bebe")%>%
+  group_by(ChildHands_dirty)%>%
+  dplyr::summarize(detected=sum(HF183), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+ChildHands_dirt_HF183_mosaic<-ChildHands_dirt_HF183_counts%>%
+  column_to_rownames("ChildHands_dirty")%>%
+  as.matrix()
+mosaicplot(ChildHands_dirt_HF183_mosaic, color=TRUE, las=3)
+
+fisher_ChildHands_dirty_HF183<-ChildHands_dirt_HF183_counts%>%
+  column_to_rownames("ChildHands_dirty")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_ChildHands_dirty_HF183 #ns; p>0.05
+
+#DG37
+ChildHands_dirt_DG37_counts<-prev%>%
+  subset(Sample_Type=="Child hands")%>%
+  dplyr::rename("ChildHands_dirty"="handrinse.dirt_bebe")%>%
+  group_by(ChildHands_dirty)%>%
+  dplyr::summarize(detected=sum(DG37), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+ChildHands_dirt_DG37_mosaic<-ChildHands_dirt_DG37_counts%>%
+  column_to_rownames("ChildHands_dirty")%>%
+  as.matrix()
+mosaicplot(ChildHands_dirt_DG37_mosaic, color=TRUE, las=3)
+
+fisher_ChildHands_dirty_DG37<-ChildHands_dirt_DG37_counts%>%
+  column_to_rownames("ChildHands_dirty")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_ChildHands_dirty_DG37 #ns; p>0.05
+
+#GFD
+ChildHands_dirt_GFD_counts<-prev%>%
+  subset(Sample_Type=="Child hands")%>%
+  dplyr::rename("ChildHands_dirty"="handrinse.dirt_bebe")%>%
+  group_by(ChildHands_dirty)%>%
+  dplyr::summarize(detected=sum(GFD), count=n())%>%
+  dplyr::mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+ChildHands_dirt_GFD_mosaic<-ChildHands_dirt_GFD_counts%>%
+  column_to_rownames("ChildHands_dirty")%>%
+  as.matrix()
+mosaicplot(ChildHands_dirt_GFD_mosaic, color=TRUE, las=3)
+
+fisher_ChildHands_dirty_GFD<-ChildHands_dirt_GFD_counts%>%
+  column_to_rownames("ChildHands_dirty")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_ChildHands_dirty_GFD #ns; p>0.05
+
+#Rum2Bac not detected in child hand washes
+
+#Pig2Bac not detected in child handwashes
+```
+
+#Child nail cleanliness and MST marker detection in child hand washes
+```{r}
+#No test for GenBac; GenBac marker present in all child hand washes
+
+#HF183
+ChildNails_dirt_HF183_counts<-prev%>%
+  subset(Sample_Type=="Child hands")%>%
+  dplyr::rename("ChildNails_dirty"="handrinse.nails_madre")%>%
+  group_by(ChildNails_dirty)%>%
+  dplyr::summarize(detected=sum(HF183), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+ChildNails_dirt_HF183_mosaic<-ChildNails_dirt_HF183_counts%>%
+  column_to_rownames("ChildNails_dirty")%>%
+  as.matrix()
+mosaicplot(ChildNails_dirt_HF183_mosaic, color=TRUE, las=3)
+
+fisher_ChildNails_dirty_HF183<-ChildNails_dirt_HF183_counts%>%
+  column_to_rownames("ChildNails_dirty")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_ChildNails_dirty_HF183 #ns; p>0.05
+
+#DG37
+ChildNails_dirt_DG37_counts<-prev%>%
+  subset(Sample_Type=="Child hands")%>%
+  dplyr::rename("ChildNails_dirty"="handrinse.nails_madre")%>%
+  group_by(ChildNails_dirty)%>%
+  dplyr::summarize(detected=sum(DG37), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+ChildNails_dirt_DG37_mosaic<-ChildNails_dirt_DG37_counts%>%
+  column_to_rownames("ChildNails_dirty")%>%
+  as.matrix()
+mosaicplot(ChildNails_dirt_DG37_mosaic, color=TRUE, las=3)
+
+fisher_ChildNails_dirty_DG37<-ChildNails_dirt_DG37_counts%>%
+  column_to_rownames("ChildNails_dirty")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_ChildNails_dirty_DG37 #ns; p>0.05
+
+#GFD
+ChildNails_dirt_GFD_counts<-prev%>%
+  subset(Sample_Type=="Child hands")%>%
+  dplyr::rename("ChildNails_dirty"="handrinse.nails_madre")%>%
+  group_by(ChildNails_dirty)%>%
+  dplyr::summarize(detected=sum(GFD), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+ChildNails_dirt_GFD_mosaic<-ChildNails_dirt_GFD_counts%>%
+  column_to_rownames("ChildNails_dirty")%>%
+  as.matrix()
+mosaicplot(ChildNails_dirt_GFD_mosaic, color=TRUE, las=3)
+
+fisher_ChildNails_dirty_GFD<-ChildNails_dirt_GFD_counts%>%
+  column_to_rownames("ChildNails_dirty")%>%
+  fisher.test(simulate.p.value = TRUE, B= 1e4)
+fisher_ChildNails_dirty_GFD #ns; p>0.05
+
+#Rum2Bac not detected in child hand washes
+
+#Pig2Bac not detected in child hand washes
+```
+
+#Child last washed and MST marker detection in child hand washes
+```{r}
+#No test for GenBac; GenBac marker present in all adult hand washes
+
+#HF183
+Child_lastwashed_HF183_counts<-prev%>%
+  subset(Sample_Type=="Child hands")%>%
+  dplyr::rename("Child_lastwashed"="handrinse.child_handwash")%>%
+  group_by(Child_lastwashed)%>%
+  dplyr::summarize(detected=sum(HF183), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+Child_lastwashed_HF183_mosaic<-Child_lastwashed_HF183_counts%>%
+  column_to_rownames("Child_lastwashed")%>%
+  as.matrix()
+mosaicplot(Child_lastwashed_HF183_mosaic, color=TRUE, las=3)
+
+fisher_Child_lastwashed_HF183<-Child_lastwashed_HF183_counts%>%
+  column_to_rownames("Child_lastwashed")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_Child_lastwashed_HF183 #ns; p>0.05
+
+#DG37
+Child_lastwashed_DG37_counts<-prev%>%
+  subset(Sample_Type=="Child hands")%>%
+  dplyr::rename("Child_lastwashed"="handrinse.child_handwash")%>%
+  group_by(Child_lastwashed)%>%
+  dplyr::summarize(detected=sum( DG37), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+Child_lastwashed_DG37_mosaic<-Child_lastwashed_DG37_counts%>%
+  column_to_rownames("Child_lastwashed")%>%
+  as.matrix()
+mosaicplot(Child_lastwashed_DG37_mosaic, color=TRUE, las=3)
+
+fisher_Child_lastwashed_DG37<-Child_lastwashed_DG37_counts%>%
+  column_to_rownames("Child_lastwashed")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_Child_lastwashed_DG37 #ns; p>0.05
+
+#GFD
+Child_lastwashed_GFD_counts<-prev%>%
+  subset(Sample_Type=="Child hands")%>%
+  dplyr::rename("Child_lastwashed"="handrinse.child_handwash")%>%
+  group_by(Child_lastwashed)%>%
+  dplyr::summarize(detected=sum(GFD), count=n())%>%
+  mutate(not_detected=count-detected)%>%
+  select(-c(count))
+
+Child_lastwashed_GFD_mosaic<-Child_lastwashed_GFD_counts%>%
+  column_to_rownames("Child_lastwashed")%>%
+  as.matrix()
+mosaicplot(Child_lastwashed_GFD_mosaic, color=TRUE, las=3)
+
+fisher_Child_lastwashed_GFD<-Child_lastwashed_GFD_counts%>%
+  column_to_rownames("Child_lastwashed")%>%
+  fisher_test(simulate.p.value = TRUE, B= 1e4)
+fisher_Child_lastwashed_GFD #ns; p>0.05
+
+#Rum2Bac not detected in child hand washes
+
+#Pig2Bac not detected in child hand washes
+```
+
+#HF183 detections in adult hand washes and other sample types with GEE and HH-level clustering
+```{r}
+#run Poisson regression with GEE 
+run_poisson_gee <- function(data, target_sample_type) {
+  df <- data %>%
+    filter(Sample_Type %in% c("Adult hands", target_sample_type)) %>%
+    group_by(Household) %>%
+    filter(n() == 2) %>%
+    ungroup() %>%
+    select(Household, Sample_Type, HF183) %>%
+    pivot_wider(names_from = Sample_Type, values_from = HF183, values_fill = 0)
+
+  names(df)[names(df) == target_sample_type] <- "target"
+  names(df)[names(df) == "Adult hands"] <- "adult"
+
+  df <- df %>%
+    mutate(
+      target_detect = ifelse(target > 0, 1, 0),
+      adult_detect = ifelse(adult > 0, 1, 0)
+    )
+
+  model <- geeglm(
+    target_detect ~ adult_detect,
+    family = poisson(link = "log"),
+    id = Household,
+    corstr = "exchangeable",
+    data = df
+  )
+
+  est <- coef(model)["adult_detect"]
+  se <- summary(model)$coefficients["adult_detect", "Std.err"]
+  RR <- exp(est)
+  CI_lower <- exp(est - 1.96 * se)
+  CI_upper <- exp(est + 1.96 * se)
+  pval <- summary(model)$coefficients["adult_detect", "Pr(>|W|)"]
+
+  return(data.frame(
+    Comparison = target_sample_type,
+    Risk_Ratio = round(RR, 2),
+    CI_Lower = round(CI_lower, 2),
+    CI_Upper = round(CI_upper, 2),
+    P_value = signif(pval, 3),
+    N_Households = nrow(df)
+  ))
+}
+
+sample_types <- c("Child hands", "Floor", "Doorknob", "Toy",
+                  "Food- prep surface", "Domestic water", "Cellphone")
+
+poisson_gee_results <- lapply(sample_types, function(type) {
+  run_poisson_gee(prev, type)
+}) %>%
+  bind_rows()
+
+print(poisson_gee_results)
+#write.csv(poisson_gee_results, file="HF183_poisson_gee_results.csv")
+
+#forest plot
+filtered_poisson_plot_data <- poisson_gee_results %>%
+  filter(!Comparison %in% c("Doorknob", "Toy", "Domestic water", "Cellphone")) %>%
+  mutate(
+    Comparison = factor(Comparison, levels = rev(unique(Comparison)))
+  ) #filters results where HF183 is present in all adult hand rinses where the other sample type is also positive (perfect concordance)
+
+#forest plot
+poisson_forest_plot <- ggplot(filtered_poisson_plot_data, aes(y = Comparison, x = Risk_Ratio)) +
+  geom_errorbarh(
+    aes(xmin = CI_Lower, xmax = CI_Upper),
+    height = 0.2,
+    color = "black"
+  ) +
+  geom_point(size = 3, color = "#59A14F") +
+  geom_vline(xintercept = 1, linetype = "dashed", color = "gray40") +
+  scale_x_log10() +
+  labs(
+    x = "Risk Ratio (log scale)",
+    y = NULL,
+    title = NULL
+  ) +
+  theme_minimal() +
+  theme(
+    axis.text.y = element_text(size = 12),
+    axis.text.x = element_text(size = 10),
+    axis.title.x = element_text(size = 13),
+    plot.title = element_text(size = 14, face = "bold", hjust = 0.5)
+  )
+
+poisson_forest_plot
+```
+
+#Sample characteristics summary table
+```{r}
+var_lookup <- tibble::tibble(
+  Variable = c(
+    "handrinse.mother_handwash",
+    "handrinse.nails_madre",
+    "handrinse.dirt_madre",
+    "handrinse.child_handwash",
+    "handrinse.nails_bebe",
+    "handrinse.dirt_bebe",
+    "Floor.type",
+    "floor.floor_cleaning",
+    "door.door_selection",
+    "food.food_container",
+    "food.food_storecond",
+    "food.food_options",
+    "foodprep.foodprep_cleaning",
+    "foodprep.foodprep_surface", 
+    "soil.soil_animal",
+    "soil.soil_feces",
+    "soil.soil_moisture",
+    "domestic_water.dwater_animals",
+    "domestic_water.dwater_store",
+    "domestic_water.dwater_container",
+    "domestic_water.dwater_child",
+    "drinkingwater.water_store",
+    "drinkingwater.water_treat",
+    "drinkingwater.fuente",
+    "drinkingwater.water_container",
+    "toys.toy_material",
+    "toys.toy_clean"
+  ),
+  Sample_characteristic = c(
+    "Adult last washed", "Adult clean nails", "Adult clean hands",
+    "Child last washed", "Child clean nails", "Child clean hands",
+    "Floor type", "Floor cleaned in the past 24h",
+    "Door location",   "Food container",
+    "Food temperature", "Food type",
+    "Food-prep surface last cleaned", "Food-prep surface material",
+    "Visible human feces", "Visible animal feces", "Soil moisture",
+    "Animals access domestic water", "Domestic water stored", "Domestic water container type", "Child access to domestic water",
+    "Drinking water stored", "Drinking water treated", "Drinking water source", "Drinking water container type",
+    "Toy material", "Toy dirty/clean"
+  ),
+  Sample_group = c(
+    rep("Adult hands", 3),
+    rep("Child hands", 3),
+    rep("Floor", 2),
+    rep("Doorknob", 1),
+    rep("Food", 3),
+    rep("Food- prep surface", 2),
+    rep("Soil", 3),
+    rep("Domestic water", 4),
+    rep("Drinking water", 4),
+    rep("Toy", 2)
+  )
+)
+
+summary_clean <- map_dfr(seq_len(nrow(var_lookup)), function(i) {
+  var <- var_lookup$Variable[i]
+  label <- var_lookup$Sample_characteristic[i]
+  group <- var_lookup$Sample_group[i]
+
+  filtered <- data %>%
+    filter(Sample_Type == group) %>%
+    filter(!is.na(.data[[var]])) %>%
+    select(Response = .data[[var]])
+
+  if (nrow(filtered) == 0) return(NULL)
+
+  filtered %>%
+    count(Response) %>%
+    mutate(
+      percent = round(n / sum(n) * 100, 1),
+      `n (%)` = paste0(n, " (", percent, "%)"),
+      Sample_characteristic = label,
+      Sample_group = group
+    ) %>%
+    select(Sample_group, Sample_characteristic, Response, `n (%)`)
+})
+
+summary_table <- summary_clean %>%
+  arrange(Sample_group, Sample_characteristic, Response) %>%
+  flextable() %>%
+  set_header_labels(
+    Sample_group = "Sample Type",
+    Sample_characteristic = "Household Environmental Practice",
+    Response = "Response",
+    `n (%)` = "n (%)"
+  ) %>%
+  merge_v(j = ~Sample_group + Sample_characteristic) %>%  
+  align(j = 1:4, align = "left", part = "all") %>%
+  bold(part = "header") %>%
+  valign(j = 1:2, valign = "top") %>% 
+  autofit() %>%
+  fontsize(part = "all", size = 10) %>%
+  theme_vanilla()
+summary_table
+
+save_as_docx(summary_table, path = "Household_Summary_Merged.docx")
+```
+
