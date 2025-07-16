@@ -1,0 +1,526 @@
+---
+title: "AnEx MST validation"
+author: "Kelsey Jesser"
+date: "7/16/2025"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+#load libraries
+```{r, warning=FALSE}
+library(dplyr)
+library(ggplot2)
+library(tidyr)
+library(ggthemes)
+library(ggpubr)
+library(cowplot)
+library(reshape2)
+```
+
+#import validation study data
+```{r, warning=FALSE}
+val<-read.csv("Ecuador_SecondSet_FecalSamples_DNAqPCR.csv")
+
+#presence/absence
+val_pa<-val%>%
+  mutate_at(c(3:10), as.numeric)%>%
+  mutate_at(c(3:10), ~ifelse(is.na(.), 0, .))%>%
+  mutate_at(c(3:10), ~ifelse(. > 0, 1, .))
+
+#replace DNQ and BDL values with na
+val_conc <- val %>%
+  mutate_all(funs(ifelse(. == "BDL", "NA", .)))%>%
+  mutate_all(funs(ifelse(. == "DNQ", "NA", .)))%>%
+  mutate_at(c(3:10), as.numeric)
+```
+
+#calculate sensitivity and specificity
+```{r, warning=FALSE}
+#GenBac3
+GenBac3_true_pos<-val_pa%>%
+  summarize(true_pos=sum(GenBac..GC.100.g.or.mL.))
+GenBac3_true_neg<-val_pa%>%
+  summarize(true_neg=sum(GenBac..GC.100.g.or.mL.==0))
+GenBac3_false_pos<-val_pa%>%
+  summarize(false_pos=sum(GenBac..GC.100.g.or.mL.))
+GenBac3_false_neg<-val_pa%>%
+  summarize(false_neg = sum(GenBac..GC.100.g.or.mL. == 0))
+GenBac3<-cbind(GenBac3_true_pos, GenBac3_false_pos, GenBac3_false_neg, GenBac3_true_neg)%>%
+  summarize(assay="GenBac", sensitivity=true_pos/(true_pos+false_neg), specificity="na")
+
+
+#HF183 feces+sewage
+HF183_true_pos<-val_pa%>%
+  filter(ANIMAL=="Sewage" | ANIMAL=="Human Feces")%>%
+  summarize(true_pos=sum(HF183..GC.100.g.or.mL.))
+HF183_true_neg<-val_pa%>%
+  filter(ANIMAL!="Sewage"&ANIMAL!="Human Feces")%>%
+  summarize(true_neg=sum(HF183..GC.100.g.or.mL.==0))
+HF183_false_pos<-val_pa%>%
+  filter(ANIMAL!="Sewage"&ANIMAL!="Human Feces")%>%
+   summarize(false_pos=sum(HF183..GC.100.g.or.mL.))
+HF183_false_neg<-val_pa%>%
+  filter(ANIMAL=="Sewage" | ANIMAL=="Human Feces")%>%
+  summarize(false_neg = sum(HF183..GC.100.g.or.mL. == 0))
+
+HF183<-cbind(HF183_true_pos, HF183_false_pos, HF183_false_neg, HF183_true_neg)%>%
+  summarize(assay="HF183", sensitivity=true_pos/(true_pos+false_neg), specificity=true_neg/(true_neg+false_pos))
+
+#HF183 sewage
+HF183_sewage_true_pos<-val_pa%>%
+  filter(ANIMAL=="Sewage")%>%
+  summarize(true_pos=sum(HF183..GC.100.g.or.mL.))
+HF183_sewage_true_neg<-val_pa%>%
+  filter(ANIMAL!="Sewage")%>%
+  summarize(true_neg=sum(HF183..GC.100.g.or.mL.==0))
+HF183_sewage_false_pos<-val_pa%>%
+  filter(ANIMAL!="Sewage")%>%
+   summarize(false_pos=sum(HF183..GC.100.g.or.mL.))
+HF183_sewage_false_neg<-val_pa%>%
+  filter(ANIMAL=="Sewage")%>%
+  summarize(false_neg = sum(HF183..GC.100.g.or.mL. == 0))
+
+HF183_sewage<-cbind(HF183_sewage_true_pos, HF183_sewage_false_pos, HF183_sewage_false_neg, HF183_sewage_true_neg)%>%
+  summarize(assay="HF183_sewage", sensitivity=true_pos/(true_pos+false_neg), specificity=true_neg/(true_neg+false_pos))
+
+#HF183 feces
+HF183_feces_true_pos<-val_pa%>%
+  filter(ANIMAL=="Human Feces")%>%
+  summarize(true_pos=sum(HF183..GC.100.g.or.mL.))
+HF183_feces_true_neg<-val_pa%>%
+  filter(ANIMAL!="Human Feces")%>%
+  summarize(true_neg=sum(HF183..GC.100.g.or.mL.==0))
+HF183_feces_false_pos<-val_pa%>%
+  filter(ANIMAL!="Human Feces")%>%
+   summarize(false_pos=sum(HF183..GC.100.g.or.mL.))
+HF183_feces_false_neg<-val_pa%>%
+  filter(ANIMAL=="Human Feces")%>%
+  summarize(false_neg = sum(HF183..GC.100.g.or.mL. == 0))
+
+HF183_feces<-cbind(HF183_feces_true_pos, HF183_feces_false_pos, HF183_feces_false_neg, HF183_feces_true_neg)%>%
+  summarize(assay="HF183 feces", sensitivity=true_pos/(true_pos+false_neg), specificity=true_neg/(true_neg+false_pos))
+
+#HumM2 feces+sewage
+HumM2_true_pos<-val_pa%>%
+  filter(ANIMAL=="Sewage" | ANIMAL=="Human Feces")%>%
+  summarize(true_pos=sum(HumM2..GC.100.g.or.mL.))
+HumM2_true_neg<-val_pa%>%
+  filter(ANIMAL!="Sewage"&ANIMAL!="Human Feces")%>%
+  summarize(true_neg=sum(HumM2..GC.100.g.or.mL.==0))
+HumM2_false_pos<-val_pa%>%
+  filter(ANIMAL!="Sewage"&ANIMAL!="Human Feces")%>%
+   summarize(false_pos=sum(HumM2..GC.100.g.or.mL.))
+HumM2_false_neg<-val_pa%>%
+  filter(ANIMAL=="Sewage" | ANIMAL=="Human Feces")%>%
+  summarize(false_neg = sum(HumM2..GC.100.g.or.mL. == 0))
+
+HumM2<-cbind(HumM2_true_pos, HumM2_false_pos, HumM2_false_neg, HumM2_true_neg)%>%
+  summarize(assay="HumM2", sensitivity=true_pos/(true_pos+false_neg), specificity=true_neg/(true_neg+false_pos))
+
+#HumM2 sewage
+HumM2_sewage_true_pos<-val_pa%>%
+  filter(ANIMAL=="Sewage")%>%
+  summarize(true_pos=sum(HumM2..GC.100.g.or.mL.))
+HumM2_sewage_true_neg<-val_pa%>%
+  filter(ANIMAL!="Sewage")%>%
+  summarize(true_neg=sum(HumM2..GC.100.g.or.mL.==0))
+HumM2_sewage_false_pos<-val_pa%>%
+  filter(ANIMAL!="Sewage")%>%
+   summarize(false_pos=sum(HumM2..GC.100.g.or.mL.))
+HumM2_sewage_false_neg<-val_pa%>%
+  filter(ANIMAL=="Sewage")%>%
+  summarize(false_neg = sum(HumM2..GC.100.g.or.mL. == 0))
+
+HumM2_sewage<-cbind(HumM2_sewage_true_pos, HumM2_sewage_false_pos, HumM2_sewage_false_neg, HumM2_sewage_true_neg)%>%
+  summarize(assay="HumM2_sewage", sensitivity=true_pos/(true_pos+false_neg), specificity=true_neg/(true_neg+false_pos))
+
+#HumM2 feces
+HumM2_feces_true_pos<-val_pa%>%
+  filter(ANIMAL=="Human Feces")%>%
+  summarize(true_pos=sum(HumM2..GC.100.g.or.mL.))
+HumM2_feces_true_neg<-val_pa%>%
+  filter(ANIMAL!="Human Feces")%>%
+  summarize(true_neg=sum(HumM2..GC.100.g.or.mL.==0))
+HumM2_feces_false_pos<-val_pa%>%
+  filter(ANIMAL!="Human Feces")%>%
+   summarize(false_pos=sum(HumM2..GC.100.g.or.mL.))
+HumM2_feces_false_neg<-val_pa%>%
+  filter(ANIMAL=="Human Feces")%>%
+  summarize(false_neg = sum(HumM2..GC.100.g.or.mL. == 0))
+
+HumM2_feces<-cbind(HumM2_feces_true_pos, HumM2_feces_false_pos, HumM2_feces_false_neg, HumM2_feces_true_neg)%>%
+  summarize(assay="HumM2 feces", sensitivity=true_pos/(true_pos+false_neg), specificity=true_neg/(true_neg+false_pos))
+
+#DG37 
+DG37_true_pos<-val_pa%>%
+  filter(ANIMAL=="Dog")%>%
+  summarize(true_pos=sum(DG37..GC.100.g.or.mL.))
+DG37_true_neg<-val_pa%>%
+  filter(ANIMAL!="Dog")%>%
+  summarize(true_neg=sum(DG37..GC.100.g.or.mL.==0))
+DG37_false_pos<-val_pa%>%
+  filter(ANIMAL!="Dog")%>%
+   summarize(false_pos=sum(DG37..GC.100.g.or.mL.))
+DG37_false_neg<-val_pa%>%
+  filter(ANIMAL=="Dog")%>%
+  summarize(false_neg = sum(DG37..GC.100.g.or.mL. == 0))
+
+DG37<-cbind(DG37_true_pos, DG37_false_pos, DG37_false_neg, DG37_true_neg)%>%
+  summarize(assay="DG37", sensitivity=true_pos/(true_pos+false_neg), specificity=true_neg/(true_neg+false_pos))
+
+#Rum2Bac 
+Rum2Bac_true_pos<-val_pa%>%
+  filter(ANIMAL=="Cow")%>%
+  summarize(true_pos=sum(Rum2Bac..GC.100.g.or.mL.))
+Rum2Bac_true_neg<-val_pa%>%
+  filter(ANIMAL!="Cow")%>%
+  summarize(true_neg=sum(Rum2Bac..GC.100.g.or.mL.==0))
+Rum2Bac_false_pos<-val_pa%>%
+  filter(ANIMAL!="Cow")%>%
+   summarize(false_pos=sum(Rum2Bac..GC.100.g.or.mL.))
+Rum2Bac_false_neg<-val_pa%>%
+  filter(ANIMAL=="Cow")%>%
+  summarize(false_neg = sum(Rum2Bac..GC.100.g.or.mL. == 0))
+
+Rum2Bac<-cbind(Rum2Bac_true_pos, Rum2Bac_false_pos, Rum2Bac_false_neg, Rum2Bac_true_neg)%>%
+  summarize(assay="Rum2Bac", sensitivity=true_pos/(true_pos+false_neg), specificity=true_neg/(true_neg+false_pos))
+
+#Pig2Bac
+Pig2Bac_true_pos<-val_pa%>%
+  filter(ANIMAL=="Pig")%>%
+  summarize(true_pos=sum(Pig.2.Bac..GC.100.g.or.mL.))
+Pig2Bac_true_neg<-val_pa%>%
+  filter(ANIMAL!="Pig")%>%
+  summarize(true_neg=sum(Pig.2.Bac..GC.100.g.or.mL.==0))
+Pig2Bac_false_pos<-val_pa%>%
+  filter(ANIMAL!="Pig")%>%
+   summarize(false_pos=sum(Pig.2.Bac..GC.100.g.or.mL.))
+Pig2Bac_false_neg<-val_pa%>%
+  filter(ANIMAL=="Pig")%>%
+  summarize(false_neg = sum(Pig.2.Bac..GC.100.g.or.mL. == 0))
+
+Pig2Bac<-cbind(Pig2Bac_true_pos, Pig2Bac_false_pos, Pig2Bac_false_neg, Pig2Bac_true_neg)%>%
+  summarize(assay="Pig2Bac", sensitivity=true_pos/(true_pos+false_neg), specificity=true_neg/(true_neg+false_pos))
+
+#AV4143
+AV4143_true_pos<-val_pa%>%
+  filter(ANIMAL=="Chicken" | ANIMAL=="Duck" | ANIMAL=="Parrot")%>%
+  summarize(true_pos=sum(AV4143..GC.100.g.or.mL.))
+AV4143_true_neg<-val_pa%>%
+  filter(ANIMAL!="Chicken" & ANIMAL!="Duck" & ANIMAL!="Parrot")%>%
+  summarize(true_neg=sum(AV4143..GC.100.g.or.mL.==0))
+AV4143_false_pos<-val_pa%>%
+  filter(ANIMAL!="Chicken" & ANIMAL!="Duck" & ANIMAL!="Parrot")%>%
+  summarize(false_pos=sum(AV4143..GC.100.g.or.mL.))
+AV4143_false_neg<-val_pa%>%
+  filter(ANIMAL=="Chicken" | ANIMAL=="Duck" | ANIMAL=="Parrot")%>%
+  summarize(false_neg = sum(AV4143..GC.100.g.or.mL. == 0))
+
+AV4143<-cbind(AV4143_true_pos, AV4143_false_pos, AV4143_false_neg, AV4143_true_neg)%>%
+  summarize(assay="AV4143", sensitivity=true_pos/(true_pos+false_neg), specificity=true_neg/(true_neg+false_pos))
+
+#GFD
+GFD_true_pos<-val_pa%>%
+  filter(ANIMAL=="Chicken" | ANIMAL=="Duck" | ANIMAL=="Parrot")%>%
+  summarize(true_pos=sum(GFD..GC.100.g.or.mL.))
+GFD_true_neg<-val_pa%>%
+  filter(ANIMAL!="Chicken" & ANIMAL!="Duck" & ANIMAL!="Parrot")%>%
+  summarize(true_neg=sum(GFD..GC.100.g.or.mL.==0))
+GFD_false_pos<-val_pa%>%
+  filter(ANIMAL!="Chicken" & ANIMAL!="Duck" & ANIMAL!="Parrot")%>%
+  summarize(false_pos=sum(GFD..GC.100.g.or.mL.))
+GFD_false_neg<-val_pa%>%
+  filter(ANIMAL=="Chicken" | ANIMAL=="Duck" | ANIMAL=="Parrot")%>%
+  summarize(false_neg = sum(GFD..GC.100.g.or.mL. == 0))
+
+GFD<-cbind(GFD_true_pos, GFD_false_pos, GFD_false_neg, GFD_true_neg)%>%
+  summarize(assay="GFD", sensitivity=true_pos/(true_pos+false_neg), specificity=true_neg/(true_neg+false_pos))
+
+sens_spec<-rbind(GenBac3, HF183, HumM2, DG37, AV4143, GFD, Rum2Bac, Pig2Bac)%>%
+  mutate_at(c(2:3), as.numeric)%>%
+  mutate_if(is.numeric, ~ round(., 2))%>%
+  mutate_if(is.numeric, function(x) x * 100)%>%
+  rename(Sensitivity=sensitivity,
+         Specificity=specificity)
+
+#plot
+sens_spec_melt<-sens_spec%>%
+  melt(id.var="assay")
+sens_spec_melt$assay <- factor(sens_spec_melt$assay, levels= (c("GenBac", "HF183", "HumM2", "DG37", "AV4143", "GFD", "Pig2Bac", "Rum2Bac")))
+
+sens_spec_plot<-sens_spec_melt%>%
+  ggplot(aes(x=assay, y=value))+
+  geom_point(aes(fill=variable), color="black", pch=21, size =3)+
+  labs(x="", y="% Sensitivity or Specificity")+
+  theme_classic()+
+  scale_x_discrete(labels=c("GenBac"="GenBac3 (general)", "HF183"="HF183 (human)", "HumM2"="HumM2 (human)", "DG37"="DG37 (dog)", "AV4143"="AV4143 (bird)", "GFD"="GFD (bird)", "Pig2Bac"="Pig2Bac (pig)", "Rum2Bac"="Rum2Bac (ruminant)"))+
+  scale_fill_manual(values=c("Sensitivity"="#FF9DA7", "Specificity"="#59A14F"))+ 
+  scale_y_continuous(expand=c(0,0), limits=c(0, 103))+
+  theme(legend.title = element_blank(), axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), legend.position="bottom")
+sens_spec_plot
+```
+
+#mean conc and stdev 
+```{r, warning=FALSE}
+#log10 transform concentration data
+val_log<-val_conc%>%
+  mutate_if(is.numeric, funs(log10(. + 1)))%>%
+  rename(GenBac3=GenBac..GC.100.g.or.mL.,
+         HF183=HF183..GC.100.g.or.mL.,
+         HumM2=HumM2..GC.100.g.or.mL.,
+         DG37=DG37..GC.100.g.or.mL.,
+         GFD=GFD..GC.100.g.or.mL.,
+         AV4143=AV4143..GC.100.g.or.mL.,
+         Pig2Bac=Pig.2.Bac..GC.100.g.or.mL.,
+         Rum2Bac=Rum2Bac..GC.100.g.or.mL.)%>%
+  melt(id.vars=c("ANIMAL", "CODE"), variable.name=("measurement"), value.name="value")
+
+
+#GenBac
+GenBac_mean<-val_log%>%
+  subset(measurement=="GenBac3")%>%
+  summarize(mean_target=mean(value), mean_target_stdev=sd(value), mean_nontarget='NA',mean_nontarget_stdev='NA', assay='GenBac3')
+  
+#HF183 sewage
+HF183_mean_target_sewage<-val_log%>%
+  filter(ANIMAL=="Sewage")%>%
+  filter(measurement=="HF183")%>%
+  na.omit()%>%
+  summarize(mean_target=mean(value), mean_target_stdev=sd(value))
+HF183_mean_nontarget_sewage<-val_log%>%
+  filter(ANIMAL!="Sewage" | ANIMAL!='Feces')%>%
+  filter(measurement=="HF183")%>%
+  na.omit()%>%
+  summarize(mean_nontarget=mean(value), mean_nontarget_stdev=sd(value))
+HF183_mean_sewage<-cbind(HF183_mean_target_sewage, HF183_mean_nontarget_sewage)
+HF183_mean_sewage$assay<-c("HF183_sewage")
+
+#HF183 feces
+HF183_mean_target_feces<-val_log%>%
+  filter(ANIMAL=="Human Feces")%>%
+  filter(measurement=="HF183")%>%
+  na.omit()%>%
+  summarize(mean_target=mean(value), mean_target_stdev=sd(value))
+HF183_mean_nontarget_feces<-val_log%>%
+  filter(ANIMAL!="Sewage" | ANIMAL!='Feces')%>%
+  filter(measurement=="HF183")%>%
+  na.omit()%>%
+  summarize(mean_nontarget=mean(value), mean_nontarget_stdev=sd(value))
+HF183_mean_feces<-cbind(HF183_mean_target_feces, HF183_mean_nontarget_feces)
+HF183_mean_feces$assay<-c("HF183_feces")
+
+#HumM2 sewage
+HumM2_mean_target_sewage<-val_log%>%
+  filter(ANIMAL=="Sewage")%>%
+  filter(measurement=="HumM2")%>%
+  na.omit()%>%
+  summarize(mean_target=mean(value), mean_target_stdev=sd(value))
+HumM2_mean_nontarget_sewage<-val_log%>%
+  filter(ANIMAL!="Sewage" | ANIMAL!='Feces')%>%
+  filter(measurement=="HumM2")%>%
+  na.omit()%>%
+  summarize(mean_nontarget=mean(value), mean_nontarget_stdev=sd(value))
+HumM2_mean_sewage<-cbind(HumM2_mean_target_sewage, HumM2_mean_nontarget_sewage)
+HumM2_mean_sewage$assay<-c("HumM2_sewage")
+
+#HumM2 feces
+HumM2_mean_target_feces<-val_log%>%
+  filter(ANIMAL=="Human Feces")%>%
+  filter(measurement=="HumM2")%>%
+  na.omit()%>%
+  summarize(mean_target=mean(value), mean_target_stdev=sd(value))
+HumM2_mean_nontarget_feces<-val_log%>%
+  filter(ANIMAL!="Sewage" | ANIMAL!='Feces')%>%
+  filter(measurement=="HumM2")%>%
+  na.omit()%>%
+  summarize(mean_nontarget=mean(value), mean_nontarget_stdev=sd(value))
+HumM2_mean_feces<-cbind(HumM2_mean_target_feces, HumM2_mean_nontarget_feces)
+HumM2_mean_feces$assay<-c("HumM2_feces")
+
+#DG37
+DG37_mean_target<-val_log%>%
+  filter(ANIMAL=="Dog")%>%
+  filter(measurement=="DG37")%>%
+  na.omit()%>%
+  summarize(mean_target=mean(value), mean_target_stdev=sd(value))
+DG37_mean_nontarget<-val_log%>%
+  filter(ANIMAL!="Dog")%>%
+  filter(measurement=="DG37")%>%
+  na.omit()%>%
+  summarize(mean_nontarget=mean(value), mean_nontarget_stdev=sd(value))
+DG37_mean<-cbind(DG37_mean_target, DG37_mean_nontarget)
+DG37_mean$assay<-c("DG37")
+
+#AV4143
+AV4143_mean_target<-val_log%>%
+  filter(ANIMAL=="Chicken" | ANIMAL=="Duck" | ANIMAL=="Parrot")%>%
+  filter(measurement=="AV4143")%>%
+  na.omit()%>%
+  summarize(mean_target=mean(value), mean_target_stdev=sd(value))
+AV4143_mean_nontarget<-val_log%>%
+  filter(ANIMAL!="Chicken" & ANIMAL!="Duck" & ANIMAL!="Parrot")%>%
+  filter(measurement=="AV4143")%>%
+  na.omit()%>%
+  summarize(mean_nontarget=mean(value), mean_nontarget_stdev=sd(value))
+AV4143_mean<-cbind(AV4143_mean_target, AV4143_mean_nontarget)
+AV4143_mean$assay<-c("AV4143")
+
+#GFD
+GFD_mean_target<-val_log%>%
+  filter(ANIMAL=="Chicken" | ANIMAL=="Duck" | ANIMAL=="Parrot")%>%
+  filter(measurement=="GFD")%>%
+  na.omit()%>%
+  summarize(mean_target=mean(value), mean_target_stdev=sd(value))
+GFD_mean_nontarget<-val_log%>%
+  filter(ANIMAL!="Chicken" & ANIMAL!="Duck" & ANIMAL!="Parrot")%>%
+  filter(measurement=="GFD")%>%
+  na.omit()%>%
+  summarize(mean_nontarget=mean(value), mean_nontarget_stdev=sd(value))
+GFD_mean<-cbind(GFD_mean_target, GFD_mean_nontarget)
+GFD_mean$assay<-c("GFD")
+
+#Pig2Bac
+Pig2Bac_mean_target<-val_log%>%
+  filter(ANIMAL=="Pig")%>%
+  filter(measurement=="Pig2Bac")%>%
+  na.omit()%>%
+  summarize(mean_target=mean(value), mean_target_stdev=sd(value))
+Pig2Bac_mean_nontarget<-val_log%>%
+  filter(ANIMAL!="Pig")%>%
+  filter(measurement=="Pig2Bac")%>%
+  na.omit()%>%
+  summarize(mean_nontarget=mean(value), mean_nontarget_stdev=sd(value))
+Pig2Bac_mean<-cbind(Pig2Bac_mean_target, Pig2Bac_mean_nontarget)
+Pig2Bac_mean$assay<-c("Pig2Bac")
+
+#Rum2Bac
+Rum2Bac_mean_target<-val_log%>%
+  filter(ANIMAL=="Cow")%>%
+  filter(measurement=="Rum2Bac")%>%
+  na.omit()%>%
+  summarize(mean_target=mean(value), mean_target_stdev=sd(value))
+Rum2Bac_mean_nontarget<-val_log%>%
+  filter(ANIMAL!="Cow")%>%
+  filter(measurement=="Rum2Bac")%>%
+  na.omit()%>%
+  summarize(mean_nontarget=mean(value), mean_nontarget_stdev=sd(value))
+Rum2Bac_mean<-cbind(Rum2Bac_mean_target, Rum2Bac_mean_nontarget)
+Rum2Bac_mean$assay<-c("Rum2Bac")
+
+mean_conc<-rbind(GenBac_mean, HF183_mean_feces, HF183_mean_sewage, HumM2_mean_feces, HumM2_mean_sewage, DG37_mean, AV4143_mean, GFD_mean, Pig2Bac_mean, Rum2Bac_mean)%>%
+  mutate_at(c(1:4), as.numeric)%>%
+  mutate_if(is.numeric, ~ round(., 2))%>%
+  relocate(assay)
+  
+#plot
+mean_conc_melt<-mean_conc%>%
+  rename("Mean target"="mean_target",
+         "Mean non-target"="mean_nontarget")%>%
+  melt(id.vars=c("assay", "mean_target_stdev", "mean_nontarget_stdev"))%>%
+  melt(id.vars=c("assay", "variable", "value"), value.name=c("stdev_value"), variable.name=c("stdev"))%>%
+   filter((variable == "Mean target" & stdev == "mean_target_stdev") |
+         (variable == "Mean non-target" & stdev == "mean_nontarget_stdev"))
+  
+mean_conc_melt$assay <- factor(mean_conc_melt$assay, levels= (c("GenBac3", "HF183_feces","HF183_sewage", "HumM2_feces", "HumM2_sewage", "DG37", "AV4143", "GFD", "Pig2Bac", "Rum2Bac")))
+
+
+mean_conc_plot <- mean_conc_melt %>%
+  ggplot() +
+  geom_errorbar(data = mean_conc_melt, aes(x = assay, ymin = value - stdev_value, ymax = value + stdev_value, group = interaction(assay, variable)), 
+                position = position_dodge(width = 0.2), width = 0.2) +
+  geom_point(aes(x = assay, y = value, fill = variable, group = interaction(assay, variable)), 
+             color = "black", pch = 21, size = 3, position = position_dodge(width = 0.2)) +
+  labs(x = "", y = expression(log[10]*" gene copies / 100 g feces or 100 mL sewage")) +
+  theme_classic() +
+  scale_fill_manual(values = c("#4E79A7", "#f2e380")) +
+  scale_x_discrete(labels = c("GenBac3" = "GenBac3 (general)", "HF183_feces" = "HF183 (human feces)", "HF183_sewage" = "HF183 (human sewage)", "HumM2_feces" = "HumM2 (human feces)", "HumM2_sewage" = "HumM2 (human sewage)", "DG37" = "DG37 (dog)", "AV4143" = "AV4143 (bird)", "GFD" = "GFD (bird)", "Pig2Bac" = "Pig2Bac (pig)", "Rum2Bac" = "Rum2Bac (ruminant)")) +
+  scale_y_continuous(expand = c(0, 0), limits = c(0, 13)) +
+  theme(legend.title = element_blank(), axis.title.y=element_text(size=8),axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1), legend.position = "bottom")
+
+mean_conc_plot
+```
+
+#percent detection and concentration plots
+```{r, warning=FALSE}
+#marker detections by target
+val_sums <- val_pa %>%
+  group_by(ANIMAL) %>%            
+  summarize("total_animals" = sum(ANIMAL == ANIMAL), "GenBac3"=sum(GenBac..GC.100.g.or.mL.),"HF183"= sum(HF183..GC.100.g.or.mL.), "HumM2"=sum(HumM2..GC.100.g.or.mL.), "DG37"= sum(DG37..GC.100.g.or.mL.), "AV4143"=sum(AV4143..GC.100.g.or.mL.), "GFD"=sum(GFD..GC.100.g.or.mL.), "Pig2Bac"=sum(Pig.2.Bac..GC.100.g.or.mL.), "Rum2Bac"=sum(Rum2Bac..GC.100.g.or.mL.))
+
+#percent detection
+val_perc<-val_sums%>%
+  mutate_at(vars(c(3:10)), list(~ . / total_animals*100))%>%
+  mutate_if(is.numeric, ~ round(., 2))%>%
+  select(-c(total_animals))%>%
+  melt(id.vars=c("ANIMAL"), variable.name=("measurement"), value.name="value")
+
+val_perc$ANIMAL <- factor(val_perc$ANIMAL, levels = c("Sewage", "Human Feces", "Cow", "Pig", "Horse", "Chicken", "Duck", "Parrot", "Cat", "Dog"))
+val_perc$measurement <- factor(val_perc$measurement, levels= (c("GenBac3", "HF183", "HumM2", "DG37", "AV4143", "GFD", "Pig2Bac", "Rum2Bac")))
+
+labels<-list("GenBac3"="GenBac3 (general)", "HF183"="HF183 (human)", "HumM2"="HumM2 (human)", "DG37"="DG37 (dog)", "AV4143"="Av4143 (bird)", "GFD"="GFD (bird)", "Pig2Bac"="Pig2Bac (pig)", "Rum2Bac"="Rum2Bac (ruminant)")
+labeller <- function(variable,value){
+  return(labels[value])}
+
+cols <- c("GenBac3"="#FF9DA7", "HF183"="#59A14F", "DG37"="#76B7B4", "GFD"="#E15759", "Pig2Bac"="#F28E2B", "Rum2Bac"="#4E79A7", "AV4143"="#b59bcc", "HumM2"="#f2e380")
+
+perc_detect<-ggplot(val_perc, aes(x=ANIMAL, y=value, fill=measurement))+
+  geom_bar(stat="identity")+
+  labs(x="Target", y="% Detection")+
+  theme_classic()+
+  scale_fill_manual(values=cols)+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), legend.position="none")+
+  scale_y_continuous(expand = c(0, 0), limits = c(0, NA))+
+  facet_wrap(measurement ~ ., labeller=labeller, ncol=2)+
+  ggtitle("Marker percent detection")
+perc_detect
+
+#melt concentration data
+conc_melt<-val_conc%>%
+  rename(GenBac3=GenBac..GC.100.g.or.mL.,
+         HF183=HF183..GC.100.g.or.mL.,
+         HumM2=HumM2..GC.100.g.or.mL.,
+         DG37=DG37..GC.100.g.or.mL.,
+         GFD=GFD..GC.100.g.or.mL.,
+         AV4143=AV4143..GC.100.g.or.mL.,
+         Pig2Bac=Pig.2.Bac..GC.100.g.or.mL.,
+         Rum2Bac=Rum2Bac..GC.100.g.or.mL.)%>%
+  melt(id.vars=c("ANIMAL", "CODE"), variable.name=("measurement"), value.name="value")
+
+conc_melt$ANIMAL <- factor(conc_melt$ANIMAL, levels = c("Sewage", "Human Feces", "Cow", "Pig", "Horse", "Chicken", "Duck", "Parrot", "Cat", "Dog"))
+conc_melt$measurement <- factor(conc_melt$measurement, levels= (c("GenBac3", "HF183", "HumM2", "DG37", "AV4143", "GFD", "Pig2Bac", "Rum2Bac")))
+
+labels<-list("GenBac3"="GenBac3 (general)", "HF183"="HF183 (human)", "HumM2"="HumM2 (human)", "DG37"="DG37 (dog)", "AV4143"="Av4143 (bird)", "GFD"="GFD (bird)", "Pig2Bac"="Pig2Bac (pig)","Rum2Bac"="Rum2Bac (ruminant)")
+labeller <- function(variable,value){
+  return(labels[value])}
+
+cols <- c("GenBac3"="#FF9DA7", "HF183"="#59A14F", "DG37"="#76B7B4",  "Pig2Bac"="#F28E2B", "Rum2Bac"="#4E79A7", "GFD"="#E15759","AV4143"="#b59bcc", "HumM2"="#f2e380")
+
+conc_detect<-ggplot(conc_melt, aes(x=ANIMAL, y=value, fill=measurement))+
+  geom_boxplot()+
+  labs(
+  x = "Target",
+  y = expression(Log[10]*" gene copies per 100 g feces or 100 mL sewage")
+  )+
+  theme_classic()+
+  scale_fill_manual(values=cols)+
+  theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust=1), legend.position="none")+
+  scale_y_continuous(expand = c(0, 0), limits = c(0, NA))+
+  facet_wrap(measurement ~ ., labeller=labeller, ncol=2)+
+  scale_y_log10()+
+  ggtitle("Marker concentration")
+
+conc_detect
+```
+
+#multiplots
+```{r, warning=FALSE}
+marker_summ<-plot_grid(sens_spec_plot, mean_conc_plot, labels=c("A", "B", align="h"))
+marker_summ
+
+marker_performance<-plot_grid(perc_detect, conc_detect, labels=c("A", "B"), align="h")
+marker_performance
+```
+

@@ -1,16 +1,16 @@
 ---
-title: "HH sample types no models"
+title: "AnEx Phase I"
 author: "Kelsey Jesser"
-date: "6/16/2023"
+date: "6/16/2025"
 output: html_document
 ---
 #Clear environment
-```{r}
+```{r, warning=FALSE}
 rm(list = ls())
 ```
 
 #Load libraries   
-```{r}
+```{r, warning=FALSE}
 library(ggplot2)
 library(dplyr)
 library(kableExtra)
@@ -34,7 +34,7 @@ library(geepack)
 ```
 
 #Import and reformat data
-```{r}
+```{r, warning=FALSE}
 #metadata
 HH<-read.csv("AnExII_ODKdata_qPCRMST_KJ.csv")%>%
   select(c(9, 82, 85, 105:106, 126, 128, 180, 184, 186, 207, 209:210, 212, 232, 234, 238, 255:260, 293:295, 297, 315:318))%>%
@@ -136,7 +136,7 @@ kbl(detections)%>%
 ```
 
 #Prevalence plot
-```{r}
+```{r, warning=FALSE}
 #format data
 counts<-prev %>%
   select(-matches("Number"))%>%
@@ -164,7 +164,7 @@ prev_sampletype_balloon<-prev_sampletype %>%
 #plot
 prev_sampletype_balloon$Assay <- factor(prev_sampletype_balloon$Assay, levels = c("Rum2Bac", "Pig2Bac", "GFD", "DG37", "HF183", "GenBac"))
 
-labels<-c("Rum2Bac (ruminant)", "Pig2Bac (pig)", "GFD (poultry)", "DG37 (dog)", "HF183 (human)", "GenBac3 (general)")
+labels<-c("Rum2Bac (ruminant)", "Pig2Bac (pig)", "GFD (bird)", "DG37 (dog)", "HF183 (human)", "GenBac3 (general)")
 
 
 cols <- c("GenBac"="#FF9DA7", "HF183"="#59A14F", "DG37"="#76B7B4", "GFD"="#E15759", "Pig2Bac"="#F28E2B", "Rum2Bac"="#4E79A7")
@@ -192,7 +192,7 @@ prevalence_plot
 ```
 
 #Sample type and MST marker detection
-```{r}
+```{r, warning=FALSE}
 markers<-c("GenBac", "HF183", "DG37", "Pig2Bac", "Pig2Bac", "Rum2Bac")
 
 #GenBac
@@ -395,7 +395,7 @@ combined_prev_fisher
 ```
 
 #Abundance plot
-```{r}
+```{r, warning=FALSE}
 data_melt<-read.csv("Updated_AnExII GenBac raw.csv")%>%
   mutate_at(vars(6:11), as.numeric)%>%
   mutate(GenBac_log=log10(GenBac))%>%
@@ -412,7 +412,7 @@ data_melt$value<-as.numeric(data_melt$value)
 
 data_melt$measurement <- factor(data_melt$measurement, levels = c("GenBac_log", "HF183_log", "DG37_log", "GFD_log", "Pig2Bac_log", "Rum2Bac_log"))
 
-labels<-c("GenBac3 (general)", "HF183 (human)", "DG37 (dog)", "GFD (poultry)", "Pig2Bac (pig)", "Rum2Bac (ruminant)")
+labels<-c("GenBac3 (general)", "HF183 (human)", "DG37 (dog)", "GFD (bird)", "Pig2Bac (pig)", "Rum2Bac (ruminant)")
 
 cols <- c("GenBac_log"="#FF9DA7", "HF183_log"="#59A14F", "DG37_log"="#76B7B4", "GFD_log"="#E15759", "Pig2Bac_log"="#F28E2B", "Rum2Bac_log"="#4E79A7")
 
@@ -424,7 +424,7 @@ abundance_boxplot <- ggplot(data = data_melt,
   scale_x_discrete(labels = labels) +
   guides(fill = guide_legend(title = "Marker")) +
   facet_wrap(~Sample_Type, nrow = 3) +
-  labs(y = "Log gene copies per sample") +
+  labs(y = expression(Log[10]*" gene copies per sample")) +
   theme(
     axis.line = element_line(),
     axis.text.y = element_text(size = 10),
@@ -445,14 +445,14 @@ abundance_boxplot
 ```
 
 #GenBac concentration testing
-```{r}
+```{r, warning=FALSE}
 #Plot abundances
 GenBac_plot<-data%>%
   subset(!(Sample_Type %in% c("Food", "Soil"))) %>%
   ggplot(aes(x=reorder(Sample_Type, GenBac_log, na.rm=TRUE), GenBac_log, fill="#FF9DA7"))+
   geom_boxplot()+
   theme_minimal()+
-  labs(y="Log gene copies per sample", x="Sample type")+
+  labs(y = expression(Log[10]*" gene copies per sample")) +
   ggtitle("GenBac3 abundance by sample type")+
   theme(axis.line=element_line(),
         axis.text.y=element_text(size=10),
@@ -484,7 +484,7 @@ write.csv(dunn_GenBac, file="Dunn_posthoc_GenBac.csv")
 ```
 
 #Floor sample metadata
-```{r}
+```{r, warning=FALSE}
 prev_floor<-prev%>%
    subset(Sample_Type=="Floor")
 
@@ -509,7 +509,7 @@ Floors
 ```
 
 #Floor type and MST marker detection in floor samples
-```{r}
+```{r, warning=FALSE}
 #GenBac
 Floor_type_GenBac_counts<-prev%>%
   dplyr::rename("Floor"="Floor.type")%>%
@@ -635,7 +635,7 @@ fisher_floor_type_Pig2Bac%>%
 ```
 
 #Floor cleaning and MST marker detection in floor samples
-```{r}
+```{r, warning=FALSE}
 #GenBac
 Floor_clean_GenBac_counts<-prev%>%
   dplyr::rename("Floor"="floor.floor_cleaning")%>%
@@ -758,7 +758,7 @@ fisher_floor_clean_Pig2Bac #ns; p>0.05
 ```
 
 #Hand rinse metadata
-```{r}
+```{r, warning=FALSE}
 prev_adult_hands<-prev %>%
   subset(Sample_Type=="Adult hands")
 
@@ -838,7 +838,7 @@ Child_hands
 ```
 
 #Adult hand cleanliness and MST marker detection in adult hand washes
-```{r}
+```{r, warning=FALSE}
 #No test for GenBac; GenBac marker present in all adult hand washes
 
 #HF183
@@ -938,7 +938,7 @@ fisher_AdultHands_dirty_Pig2Bac#ns; p>0.05
 ```
 
 #Adult nail cleanliness and MST marker detection in adult hand washes
-```{r}
+```{r, warning=FALSE}
 #No test for GenBac; GenBac marker present in all adult hand washes
 
 #HF183
@@ -1038,7 +1038,7 @@ fisher_AdultNails_dirty_Pig2Bac #ns; p>0.05
 ```
 
 #Adult last washed and MST marker detection in adult hand washes
-```{r}
+```{r, warning=FALSE}
 #No test for GenBac; GenBac marker present in all adult hand washes
 
 #HF183
@@ -1138,7 +1138,7 @@ fisher_Adult_lastwashed_Pig2Bac #ns; p>0.05
 ```
 
 #Child hand cleanliness and MST marker detection in child hand washes
-```{r}
+```{r, warning=FALSE}
 #No test for GenBac; GenBac marker present in all child hand washes
 
 #HF183
@@ -1204,7 +1204,7 @@ fisher_ChildHands_dirty_GFD #ns; p>0.05
 ```
 
 #Child nail cleanliness and MST marker detection in child hand washes
-```{r}
+```{r, warning=FALSE}
 #No test for GenBac; GenBac marker present in all child hand washes
 
 #HF183
@@ -1270,7 +1270,7 @@ fisher_ChildNails_dirty_GFD #ns; p>0.05
 ```
 
 #Child last washed and MST marker detection in child hand washes
-```{r}
+```{r, warning=FALSE}
 #No test for GenBac; GenBac marker present in all adult hand washes
 
 #HF183
@@ -1336,7 +1336,7 @@ fisher_Child_lastwashed_GFD #ns; p>0.05
 ```
 
 #HF183 detections in adult hand washes and other sample types with GEE and HH-level clustering
-```{r}
+```{r, warning=FALSE}
 #run Poisson regression with GEE 
 run_poisson_gee <- function(data, target_sample_type) {
   df <- data %>%
@@ -1410,7 +1410,7 @@ poisson_forest_plot <- ggplot(filtered_poisson_plot_data, aes(y = Comparison, x 
   geom_vline(xintercept = 1, linetype = "dashed", color = "gray40") +
   scale_x_log10() +
   labs(
-    x = "Risk Ratio (log scale)",
+    x = expression("Risk Ratio (" * log[10] * " scale)"),
     y = NULL,
     title = NULL
   ) +
@@ -1426,7 +1426,7 @@ poisson_forest_plot
 ```
 
 #Sample characteristics summary table
-```{r}
+```{r, warning=FALSE}
 var_lookup <- tibble::tibble(
   Variable = c(
     "handrinse.mother_handwash",
@@ -1526,4 +1526,5 @@ summary_table
 
 save_as_docx(summary_table, path = "Household_Summary_Merged.docx")
 ```
+
 
